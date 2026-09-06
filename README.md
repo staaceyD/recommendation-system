@@ -167,7 +167,7 @@ dispatches to `rating_based` or `collaborative` service accordingly.
 
 - [ ] Project scaffolding (Flask app factory, config, `pyproject.toml`/`uv.lock`, `.gitignore`)
 - [ ] Docker Compose for local MySQL
-- [ ] DB schema: `User`, `Movie`, `Rating` models + first Alembic migration
+- [x] DB schema: `User`, `Movie`, `Genre`, `Rating` models + first Alembic migration
 - [ ] Seed script for MovieLens dataset
 - [ ] Auth (register/login)
 - [ ] Movie listing/search endpoints

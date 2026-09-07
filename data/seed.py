@@ -58,12 +58,7 @@ def chunked_executemany(cursor, sql: str, rows, chunk: int = INSERT_CHUNK) -> in
 
 
 def missing_tables(cursor) -> list[str]:
-    """Return the seedable tables that don't exist yet in the target schema.
-
-    Lets us fail with a clear "run migrations first" message instead of an opaque
-    ``(1146, "Table '...' doesn't exist")`` traceback when seed.py is run before
-    ``flask db upgrade``.
-    """
+    """Return the seedable tables that don't exist yet."""
     cursor.execute(
         "SELECT table_name FROM information_schema.tables "
         "WHERE table_schema = DATABASE()"

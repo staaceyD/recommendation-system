@@ -50,4 +50,7 @@ instance, configured through `DATABASE_URL` in `.env` (see `README.md`).
   collaborative-filtering one, dispatched from a single `/recommendations` endpoint based on
   whether the requesting user has ratings. Keep that dispatch logic thin — the branching belongs
   in one place, not scattered across routes.
-- Tests run against a separate test DB/config, never the dev database.
+- Tests run against a separate test DB/config, never the dev database. Tests that seed must load
+  only a handful of rows (tiny fixture CSVs), never the full dataset.
+- Keep comments and docstrings minimal — only what isn't obvious from the code. One-line docstrings
+  where a docstring earns its place; skip them on self-explanatory helpers and tests.

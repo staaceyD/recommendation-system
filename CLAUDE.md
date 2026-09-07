@@ -14,10 +14,13 @@ Full plan and roadmap live in `README.md` — treat it as the source of truth fo
 build order, and keep its checklist up to date as work lands.
 
 **Status:** DB scaffolding exists: `app/` (app factory, config, extensions) and SQLAlchemy models
-(`User`, `Movie`, `Genre`, `Rating`, plus the `movie_genres` join table) with a first Alembic
-migration applied to local MySQL (`recsys` and `recsys_test` databases, empty tables). No routes,
-auth, seed script, or tests have been written yet — don't assume any other planned structure in the
-README exists until you check.
+(`User`, `Movie`, `Genre`, `Rating`, plus the `movie_genres` join table) with Alembic
+migrations applied to local MySQL (`recsys` and `recsys_test` databases). The MovieLens `ml-32m`
+dataset is downloaded locally into `data/raw/` (gitignored, never committed); `data/preprocess.py`
+converts the raw CSVs into the shape `data/seed.py` loads, and the seed script parses those and
+loads genres/movies/users/ratings — MovieLens `movieId`/`userId` are reused as primary keys, users
+are placeholder rows built from the ids in `ratings.csv`. No routes, auth, or tests have been
+written yet — don't assume any other planned structure in the README exists until you check.
 
 ## Commands
 

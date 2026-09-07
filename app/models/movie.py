@@ -12,7 +12,6 @@ class Movie(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(255), nullable=False)
-    year = db.Column(db.Integer, nullable=True)
 
     genres = db.relationship("Genre", secondary=movie_genres, backref="movies")
     ratings = db.relationship("Rating", back_populates="movie", cascade="all, delete-orphan")

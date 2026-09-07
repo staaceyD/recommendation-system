@@ -1,12 +1,14 @@
 import os
 
 from dotenv import load_dotenv
-from flask import Flask
 
-from app.config import config_by_name
-from app.extensions import db, migrate
 
 load_dotenv()
+
+from flask import Flask  # noqa: E402
+
+from app.config import config_by_name  # noqa: E402
+from app.extensions import db, migrate  # noqa: E402
 
 
 def create_app(config_name=None):

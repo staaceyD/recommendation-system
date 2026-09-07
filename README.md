@@ -174,6 +174,26 @@ uv run pytest --cov=app
 Tests run against a separate test database/config (`FLASK_ENV=testing`) so they never touch dev
 data.
 
+## Linting
+
+```bash
+uv run ruff check .        # lint
+uv run ruff format .       # auto-format
+uv run ruff format --check .   # verify formatting (what CI runs)
+```
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request against `main`, in two jobs:
+
+- **lint** — `ruff check` + `ruff format --check`
+- **test** — `pytest --cov=app` against a throwaway MySQL 8 service container
+
+Merges into `main` should be gated on both jobs passing. That gate is repository configuration,
+not code: in GitHub go to **Settings → Branches → Add branch ruleset** (or **Branch protection
+rules**) for `main`, enable **Require status checks to pass before merging**, and select the
+`lint` and `test` checks (they appear in the list after the workflow has run once).
+
 ## API endpoints (planned)
 
 | Method | Endpoint                        | Description                                          |
@@ -200,7 +220,7 @@ and dispatches to `rating_based` or `collaborative` service accordingly.
 - [ ] Collaborative filtering recommendation service (cold-start users)
 - [ ] `/recommendations` endpoint wiring both strategies together
 - [ ] Test suite (models, routes, both recommenders)
-- [ ] CI (lint + tests on push)
+- [x] CI (lint + tests on push / PR — `.github/workflows/ci.yml`)
 
 ## Contributing
 

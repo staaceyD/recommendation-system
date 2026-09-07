@@ -33,6 +33,8 @@ uv run flask db upgrade        # apply migrations
 uv run python data/seed.py     # seed the DB
 uv run pytest                  # run tests
 uv run pytest --cov=app        # run tests with coverage
+uv run ruff check .            # lint (CI gate)
+uv run ruff format --check .   # formatting check (CI gate)
 uv add <package>                # add a runtime dependency
 uv add --dev <package>          # add a dev-only dependency
 ```

@@ -1,5 +1,4 @@
-"""Turn the raw MovieLens ``ml-32m`` CSVs into the shape ``seed.py`` expects.
-"""
+"""Turn the raw MovieLens ``ml-32m`` CSVs into the shape ``seed.py`` expects."""
 
 from __future__ import annotations
 
@@ -23,9 +22,10 @@ def preprocess_movies(src: Path, out: Path) -> tuple[int, int]:
     """Explode ``movieId,title,genres`` into one ``movieId,title,genre`` row per pair."""
     movies = 0
     rows_out = 0
-    with src.open(newline="", encoding="utf-8") as fh_in, out.open(
-        "w", newline="", encoding="utf-8"
-    ) as fh_out:
+    with (
+        src.open(newline="", encoding="utf-8") as fh_in,
+        out.open("w", newline="", encoding="utf-8") as fh_out,
+    ):
         reader = csv.reader(fh_in)
         writer = csv.writer(fh_out)
         header = next(reader)
@@ -44,9 +44,10 @@ def preprocess_movies(src: Path, out: Path) -> tuple[int, int]:
 def preprocess_ratings(src: Path, out: Path) -> int:
     """Drop the timestamp column: ``userId,movieId,rating,timestamp`` -> ``...,rating``."""
     count = 0
-    with src.open(newline="", encoding="utf-8") as fh_in, out.open(
-        "w", newline="", encoding="utf-8"
-    ) as fh_out:
+    with (
+        src.open(newline="", encoding="utf-8") as fh_in,
+        out.open("w", newline="", encoding="utf-8") as fh_out,
+    ):
         reader = csv.reader(fh_in)
         writer = csv.writer(fh_out)
         header = next(reader)

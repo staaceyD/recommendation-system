@@ -17,7 +17,7 @@ import csv
 import sys
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -60,8 +60,7 @@ def chunked_executemany(cursor, sql: str, rows, chunk: int = INSERT_CHUNK) -> in
 def missing_tables(cursor) -> list[str]:
     """Return the seedable tables that don't exist yet."""
     cursor.execute(
-        "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema = DATABASE()"
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()"
     )
     present = {row[0].lower() for row in cursor.fetchall()}
     return [t for t in TABLES if t not in present]
@@ -105,9 +104,7 @@ def load_movies_and_genres(cursor) -> set[int]:
                 genres_by_movie[movie_id].add(genre)
 
     all_genres = sorted({g for gs in genres_by_movie.values() for g in gs})
-    chunked_executemany(
-        cursor, "INSERT INTO genres (name) VALUES (%s)", ((g,) for g in all_genres)
-    )
+    chunked_executemany(cursor, "INSERT INTO genres (name) VALUES (%s)", ((g,) for g in all_genres))
     cursor.execute("SELECT id, name FROM genres")
     genre_id = {name: gid for gid, name in cursor.fetchall()}
 
@@ -119,11 +116,7 @@ def load_movies_and_genres(cursor) -> set[int]:
     chunked_executemany(
         cursor,
         "INSERT INTO movie_genres (movie_id, genre_id) VALUES (%s, %s)",
-        (
-            (mid, genre_id[g])
-            for mid, gs in genres_by_movie.items()
-            for g in gs
-        ),
+        ((mid, genre_id[g]) for mid, gs in genres_by_movie.items() for g in gs),
     )
 
     print(
@@ -137,7 +130,7 @@ def load_movies_and_genres(cursor) -> set[int]:
 def load_users_and_ratings(
     connection, cursor, valid_movie_ids: set[int], ratings_limit: int | None
 ) -> None:
-    created_at = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+    created_at = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
 
     seen_users: set[int] = set()
     pending_users: list[tuple[int, datetime]] = []

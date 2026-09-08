@@ -1,3 +1,6 @@
+# MovieLens dataset — downloaded locally, never committed (see README "Seed the database")
+data/raw/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]

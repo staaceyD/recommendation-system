@@ -10,6 +10,9 @@ given user:
   filtering** over the full ratings matrix (e.g. popularity among similar user cohorts) to give a
   reasonable cold-start experience.
 
+Every endpoint receives a `user_id` from the caller — this app does not manage authentication or
+create users. Users are the placeholder rows loaded by the seed script from the MovieLens dataset.
+
 ## Tech stack
 
 - **Backend:** Python 3.11+, Flask
@@ -31,12 +34,13 @@ recommendation-system/
 │   ├── config.py              # config classes (Dev/Test/Prod)
 │   ├── extensions.py          # db, migrate instances
 │   ├── models/                # SQLAlchemy models: User, Movie, Rating
-│   ├── routes/                # Flask blueprints (auth, movies, ratings, recommendations)
+│   ├── routes/                # Flask blueprints (movies, ratings, recommendations)
 │   └── services/
 │       ├── rating_based.py    # recs from a user's own rating history
 │       └── collaborative.py   # collaborative filtering for cold-start users
 ├── data/
-│   ├── raw/                   # downloaded MovieLens CSVs (gitignored)
+│   ├── raw/                   # MovieLens CSVs: ml-32m/ source + preprocessed output (gitignored)
+│   ├── preprocess.py          # raw ml-32m CSVs -> the shape seed.py loads
 │   └── seed.py                # loads raw/ into MySQL
 ├── migrations/                 # Alembic migrations
 ├── tests/
@@ -83,7 +87,6 @@ cp .env.example .env
 ```
 FLASK_APP=run.py
 FLASK_ENV=development
-SECRET_KEY=change-me
 DATABASE_URL=mysql+pymysql://recsys:recsys@localhost:3306/recsys
 ```
 
@@ -103,15 +106,36 @@ Or point `DATABASE_URL` at an existing local MySQL instance.
 uv run flask db upgrade
 ```
 
-### 5. Seed the database
+### 5. Get the dataset
 
-Downloads (or reads a local copy of) the MovieLens dataset and loads movies/ratings into MySQL:
+The MovieLens data is **not** committed to the repo (everything under `data/raw/`
+is gitignored). Download [`ml-32m.zip`](https://grouplens.org/datasets/movielens/)
+and unzip it into `data/raw/` so the files land at `data/raw/ml-32m/`, then
+convert them to the shape the seed script loads:
 
 ```bash
-uv run python data/seed.py
+uv run python data/preprocess.py
 ```
 
-### 6. Run the app
+This writes `data/raw/movies.csv` (`movieId,title,genre`, one row per movie/genre
+pair) and `data/raw/ratings.csv` (`userId,movieId,rating`).
+
+### 6. Seed the database
+
+Reads `data/raw/movies.csv` and `data/raw/ratings.csv` and loads
+genres/movies/users/ratings into MySQL:
+
+```bash
+uv run python data/seed.py                    # full seed (~32M ratings, a few minutes)
+uv run python data/seed.py --reset            # wipe the tables first, then re-seed
+uv run python data/seed.py --ratings-limit N  # only load the first N ratings (quick partial seed)
+```
+
+Users are synthesised from the ids in `ratings.csv` as placeholder rows (no
+credentials). The script targets whichever database the current `FLASK_ENV`
+resolves to, so it won't touch the test database unless asked.
+
+### 7. Run the app
 
 ```bash
 uv run flask run
@@ -150,33 +174,53 @@ uv run pytest --cov=app
 Tests run against a separate test database/config (`FLASK_ENV=testing`) so they never touch dev
 data.
 
+## Linting
+
+```bash
+uv run ruff check .        # lint
+uv run ruff format .       # auto-format
+uv run ruff format --check .   # verify formatting (what CI runs)
+```
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push and pull request against `main`, in two jobs:
+
+- **lint** — `ruff check` + `ruff format --check`
+- **test** — `pytest --cov=app` against a throwaway MySQL 8 service container
+
+Merges into `main` should be gated on both jobs passing. That gate is repository configuration,
+not code: in GitHub go to **Settings → Branches → Add branch ruleset** (or **Branch protection
+rules**) for `main`, enable **Require status checks to pass before merging**, and select the
+`lint` and `test` checks (they appear in the list after the workflow has run once).
+
 ## API endpoints (planned)
 
-| Method | Endpoint                        | Description                                   |
-|--------|----------------------------------|------------------------------------------------|
-| POST   | `/auth/register`                | Create a user                                   |
-| POST   | `/auth/login`                   | Log in                                          |
-| GET    | `/movies`                       | List / search movies                            |
-| POST   | `/movies/<id>/rate`             | Rate a movie                                    |
-| GET    | `/recommendations`              | Get recommendations for the current user        |
+| Method | Endpoint                        | Description                                          |
+|--------|---------------------------------|-----------------------------------------------------|
+| GET    | `/movies`                       | List / search movies                                |
+| POST   | `/movies/<id>/rate`             | Rate a movie (body includes `user_id`)              |
+| GET    | `/recommendations?user_id=<id>` | Get recommendations for the given user               |
 
-`GET /recommendations` is the core endpoint: it checks whether the user has existing ratings and
-dispatches to `rating_based` or `collaborative` service accordingly.
+Every request carries the `user_id` of the acting user (query param or request body) — there is no
+registration, login, or session handling in this service.
+
+`GET /recommendations` is the core endpoint: it checks whether the given user has existing ratings
+and dispatches to `rating_based` or `collaborative` service accordingly.
 
 ## Roadmap
 
 - [ ] Project scaffolding (Flask app factory, config, `pyproject.toml`/`uv.lock`, `.gitignore`)
 - [ ] Docker Compose for local MySQL
-- [ ] DB schema: `User`, `Movie`, `Rating` models + first Alembic migration
-- [ ] Seed script for MovieLens dataset
-- [ ] Auth (register/login)
+- [x] DB schema: `User`, `Movie`, `Genre`, `Rating` models + first Alembic migration
+- [x] Seed script for MovieLens dataset (`data/preprocess.py` + `data/seed.py`)
 - [ ] Movie listing/search endpoints
 - [ ] Rating endpoint
 - [ ] Rating-based recommendation service (for users with ratings)
 - [ ] Collaborative filtering recommendation service (cold-start users)
 - [ ] `/recommendations` endpoint wiring both strategies together
 - [ ] Test suite (models, routes, both recommenders)
-- [ ] CI (lint + tests on push)
+- [x] CI (lint + tests on push / PR — `.github/workflows/ci.yml`)
 
 ## Contributing
 

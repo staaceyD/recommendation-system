@@ -14,5 +14,13 @@ class Rating(db.Model):
     user = db.relationship("User", back_populates="ratings")
     movie = db.relationship("Movie", back_populates="ratings")
 
+    def to_dict(self):
+        return {
+            "user_id": self.user_id,
+            "movie_id": self.movie_id,
+            "rating": self.rating,
+            "rated_at": self.rated_at.isoformat() if self.rated_at else None,
+        }
+
     def __repr__(self):
         return f"<Rating user={self.user_id} movie={self.movie_id} rating={self.rating}>"

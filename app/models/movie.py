@@ -16,5 +16,8 @@ class Movie(db.Model):
     genres = db.relationship("Genre", secondary=movie_genres, backref="movies")
     ratings = db.relationship("Rating", back_populates="movie", cascade="all, delete-orphan")
 
+    def to_dict(self):
+        return {"id": self.id, "title": self.title, "genres": sorted(g.name for g in self.genres)}
+
     def __repr__(self):
         return f"<Movie {self.id} {self.title!r}>"

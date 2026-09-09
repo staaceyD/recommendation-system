@@ -205,7 +205,7 @@ and dispatches to `rating_based` or `collaborative` service accordingly.
 - [ ] Project scaffolding (Flask app factory, config, `pyproject.toml`/`uv.lock`, `.gitignore`)
 - [x] DB schema: `User`, `Movie`, `Genre`, `Rating` models + first Alembic migration
 - [x] Seed script for MovieLens dataset (`data/preprocess.py` + `data/seed.py`)
-- [ ] Movie listing/search endpoints
+- [x] Movie listing/search endpoints (`GET /movies` — title search, genre filter, pagination)
 - [ ] Rating endpoint
 - [ ] Rating-based recommendation service (for users with ratings)
 - [ ] Collaborative filtering recommendation service (cold-start users)

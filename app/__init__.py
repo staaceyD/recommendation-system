@@ -20,5 +20,8 @@ def create_app(config_name=None):
     migrate.init_app(app, db)
 
     from app import models  # noqa: F401
+    from app.routes import register_routes
+
+    register_routes(app)
 
     return app

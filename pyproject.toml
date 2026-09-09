@@ -1,18 +1,16 @@
 [project]
 name = "recommendation-system"
 version = "0.1.0"
-description = "Movie recommender system (Flask + MySQL)"
+description = "Movie recommender system (Flask + SQLite)"
 requires-python = ">=3.11"
 dependencies = [
     "flask>=3.0",
     "flask-sqlalchemy>=3.1",
     "flask-migrate>=4.0",
-    "pymysql>=1.1",
     "python-dotenv>=1.0",
     "pandas>=2.2",
     "numpy>=1.26",
     "scikit-learn>=1.4",
-    "cryptography>=50.0.1",
 ]
 
 [dependency-groups]

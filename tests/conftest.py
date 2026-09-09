@@ -19,10 +19,8 @@ def _app():
 def db_conn(_app):
     raw = db.engine.raw_connection()
     cur = raw.cursor()
-    cur.execute("SET FOREIGN_KEY_CHECKS = 0")
     for table in seed.TABLES:
-        cur.execute(f"TRUNCATE TABLE {table}")
-    cur.execute("SET FOREIGN_KEY_CHECKS = 1")
+        cur.execute(f"DELETE FROM {table}")
     raw.commit()
     yield raw, cur
     raw.rollback()

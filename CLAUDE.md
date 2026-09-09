@@ -4,7 +4,8 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
-Movie recommender web app: Flask backend, MySQL database, seeded from the MovieLens dataset.
+Movie recommender web app: Flask backend, SQLite database (a single file, `instance/recsys.db` —
+no server), seeded from the MovieLens dataset.
 Recommendation strategy is hybrid:
 - User has existing ratings → recommend from that rating history.
 - User has no ratings (cold start) → fall back to collaborative filtering over the full ratings
@@ -14,9 +15,10 @@ Full plan and roadmap live in `README.md` — treat it as the source of truth fo
 build order, and keep its checklist up to date as work lands.
 
 **Status:** DB scaffolding exists: `app/` (app factory, config, extensions) and SQLAlchemy models
-(`User`, `Movie`, `Genre`, `Rating`, plus the `movie_genres` join table) with Alembic
-migrations applied to local MySQL (`recsys` and `recsys_test` databases). The MovieLens `ml-32m`
-dataset is downloaded locally into `data/raw/` (gitignored, never committed); `data/preprocess.py`
+(`User`, `Movie`, `Genre`, `Rating`, plus the `movie_genres` join table) with the first Alembic
+migration applied to `instance/recsys.db`. Tests run against an in-memory SQLite DB. The MovieLens
+`ml-32m` dataset is downloaded locally into `data/raw/` (gitignored, never committed);
+`data/preprocess.py`
 converts the raw CSVs into the shape `data/seed.py` loads, and the seed script parses those and
 loads genres/movies/users/ratings — MovieLens `movieId`/`userId` are reused as primary keys, users
 are placeholder rows built from the ids in `ratings.csv`. No routes, auth, or tests have been
@@ -42,8 +44,8 @@ uv add --dev <package>          # add a dev-only dependency
 `uv add`/`uv add --dev` update both `pyproject.toml` and `uv.lock` — always commit both together,
 never hand-edit `uv.lock`.
 
-MySQL runs locally via Docker Compose (once `docker-compose.yml` exists) or an existing local
-instance, configured through `DATABASE_URL` in `.env` (see `README.md`).
+The database is a local SQLite file, configured through `DATABASE_URL` in `.env` (defaults to
+`sqlite:///recsys.db`, which Flask resolves to `instance/recsys.db`). No server, no Docker.
 
 ## Conventions
 

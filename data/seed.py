@@ -42,7 +42,7 @@ RATINGS_BATCH = 50_000
 
 
 def chunked_executemany(cursor, sql: str, rows, chunk: int = INSERT_CHUNK) -> int:
-    """``executemany`` in bounded batches so we never blow past ``max_allowed_packet``."""
+    """``executemany`` in bounded batches to keep memory flat on the 32M-row load."""
     total = 0
     batch: list = []
     for row in rows:
@@ -59,9 +59,7 @@ def chunked_executemany(cursor, sql: str, rows, chunk: int = INSERT_CHUNK) -> in
 
 def missing_tables(cursor) -> list[str]:
     """Return the seedable tables that don't exist yet."""
-    cursor.execute(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE()"
-    )
+    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     present = {row[0].lower() for row in cursor.fetchall()}
     return [t for t in TABLES if t not in present]
 
@@ -81,10 +79,9 @@ def table_counts(cursor) -> dict[str, int]:
 
 
 def reset_tables(cursor) -> None:
-    cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+    # TABLES is ordered child-to-parent, so plain deletes stay referentially safe.
     for table in TABLES:
-        cursor.execute(f"TRUNCATE TABLE {table}")
-    cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+        cursor.execute(f"DELETE FROM {table}")
 
 
 def load_movies_and_genres(cursor) -> set[int]:
@@ -104,18 +101,18 @@ def load_movies_and_genres(cursor) -> set[int]:
                 genres_by_movie[movie_id].add(genre)
 
     all_genres = sorted({g for gs in genres_by_movie.values() for g in gs})
-    chunked_executemany(cursor, "INSERT INTO genres (name) VALUES (%s)", ((g,) for g in all_genres))
+    chunked_executemany(cursor, "INSERT INTO genres (name) VALUES (?)", ((g,) for g in all_genres))
     cursor.execute("SELECT id, name FROM genres")
     genre_id = {name: gid for gid, name in cursor.fetchall()}
 
     chunked_executemany(
         cursor,
-        "INSERT INTO movies (id, title) VALUES (%s, %s)",
+        "INSERT INTO movies (id, title) VALUES (?, ?)",
         titles.items(),
     )
     chunked_executemany(
         cursor,
-        "INSERT INTO movie_genres (movie_id, genre_id) VALUES (%s, %s)",
+        "INSERT INTO movie_genres (movie_id, genre_id) VALUES (?, ?)",
         ((mid, genre_id[g]) for mid, gs in genres_by_movie.items() for g in gs),
     )
 
@@ -130,10 +127,12 @@ def load_movies_and_genres(cursor) -> set[int]:
 def load_users_and_ratings(
     connection, cursor, valid_movie_ids: set[int], ratings_limit: int | None
 ) -> None:
-    created_at = datetime.now(UTC).replace(tzinfo=None, microsecond=0)
+    # ISO string rather than a datetime object: SQLite stores it verbatim and the
+    # implicit datetime->str adapter is deprecated on Python 3.12+.
+    created_at = datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat(sep=" ")
 
     seen_users: set[int] = set()
-    pending_users: list[tuple[int, datetime]] = []
+    pending_users: list[tuple[int, str]] = []
     pending_ratings: list[tuple[int, int, float]] = []
 
     read = 0
@@ -146,14 +145,14 @@ def load_users_and_ratings(
         if pending_users:
             chunked_executemany(
                 cursor,
-                "INSERT IGNORE INTO users (id, created_at) VALUES (%s, %s)",
+                "INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)",
                 pending_users,
             )
             pending_users.clear()
         if pending_ratings:
             chunked_executemany(
                 cursor,
-                "INSERT IGNORE INTO ratings (user_id, movie_id, rating) VALUES (%s, %s, %s)",
+                "INSERT OR IGNORE INTO ratings (user_id, movie_id, rating) VALUES (?, ?, ?)",
                 pending_ratings,
             )
             inserted_ratings += len(pending_ratings)
@@ -254,11 +253,13 @@ def main(argv: list[str] | None = None) -> int:
                 reset_tables(cursor)
                 raw.commit()
 
-            # Speed up the bulk load; our own filtering keeps referential integrity.
-            # NB: unique_checks is left on -- INSERT IGNORE relies on the unique-index
-            # check to drop duplicate (user_id, movie_id) rows, and disabling it would
-            # let duplicates corrupt uq_rating_user_movie.
-            cursor.execute("SET SESSION foreign_key_checks = 0")
+            # Speed up the bulk load. Durability doesn't matter for a throwaway seed,
+            # and SQLite enforces no foreign keys unless PRAGMA foreign_keys is ON
+            # (it isn't here) -- our own filtering keeps referential integrity. The
+            # unique index on (user_id, movie_id) still applies, so INSERT OR IGNORE
+            # drops duplicate ratings.
+            cursor.execute("PRAGMA synchronous = OFF")
+            cursor.execute("PRAGMA journal_mode = MEMORY")
 
             print("Loading movies and genres...")
             valid_movie_ids = load_movies_and_genres(cursor)
@@ -267,7 +268,6 @@ def main(argv: list[str] | None = None) -> int:
             print("Loading users and ratings...")
             load_users_and_ratings(raw, cursor, valid_movie_ids, args.ratings_limit)
 
-            cursor.execute("SET SESSION foreign_key_checks = 1")
             raw.commit()
 
             print("Final row counts:")

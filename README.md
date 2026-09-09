@@ -1,6 +1,6 @@
 # Recommendation System
 
-A movie recommender web app built with **Flask** and **MySQL**. The database is seeded with a
+A movie recommender web app built with **Flask** and **SQLite**. The database is seeded with a
 public movie ratings dataset ([MovieLens](https://grouplens.org/datasets/movielens/)). For any
 given user:
 
@@ -16,14 +16,13 @@ create users. Users are the placeholder rows loaded by the seed script from the 
 ## Tech stack
 
 - **Backend:** Python 3.11+, Flask
-- **Database:** MySQL 8
+- **Database:** SQLite (a single file, `instance/recsys.db` — no server to run)
 - **ORM / migrations:** Flask-SQLAlchemy, Flask-Migrate (Alembic)
 - **ML / data:** pandas, numpy, scikit-learn (and/or `implicit` / `surprise` for matrix
   factorization CF)
 - **Testing:** pytest, pytest-cov
 - **Config:** python-dotenv
 - **Env / package management:** [uv](https://docs.astral.sh/uv/)
-- **Local infra:** Docker Compose (for MySQL)
 
 ## Project structure (planned)
 
@@ -41,14 +40,14 @@ recommendation-system/
 ├── data/
 │   ├── raw/                   # MovieLens CSVs: ml-32m/ source + preprocessed output (gitignored)
 │   ├── preprocess.py          # raw ml-32m CSVs -> the shape seed.py loads
-│   └── seed.py                # loads raw/ into MySQL
+│   └── seed.py                # loads raw/ into SQLite
+├── instance/                   # recsys.db lives here (gitignored)
 ├── migrations/                 # Alembic migrations
 ├── tests/
 │   ├── conftest.py
 │   ├── test_models.py
 │   ├── test_routes.py
 │   └── test_recommenders.py
-├── docker-compose.yml          # local MySQL
 ├── .env.example
 ├── pyproject.toml              # deps + uv config
 ├── uv.lock                     # uv lockfile (committed)
@@ -62,8 +61,8 @@ recommendation-system/
 
 - [uv](https://docs.astral.sh/uv/getting-started/installation/) (manages the Python version, the
   virtual environment, and dependencies — no manual `venv`/`pip` needed)
-- MySQL 8 (locally installed, or via Docker)
-- Docker + Docker Compose (optional, recommended for MySQL)
+
+That's it — SQLite ships with Python, so there's no database server to install or run.
 
 ### 1. Clone and install dependencies
 
@@ -87,26 +86,19 @@ cp .env.example .env
 ```
 FLASK_APP=run.py
 FLASK_ENV=development
-DATABASE_URL=mysql+pymysql://recsys:recsys@localhost:3306/recsys
+DATABASE_URL=sqlite:///recsys.db
 ```
 
-### 3. Start MySQL
+`sqlite:///recsys.db` is a relative path, so Flask resolves it to `instance/recsys.db`. Use an
+absolute path (`sqlite:////abs/path/recsys.db`) to put the file elsewhere.
 
-Using Docker Compose:
-
-```bash
-docker compose up -d
-```
-
-Or point `DATABASE_URL` at an existing local MySQL instance.
-
-### 4. Run migrations
+### 3. Run migrations
 
 ```bash
 uv run flask db upgrade
 ```
 
-### 5. Get the dataset
+### 4. Get the dataset
 
 The MovieLens data is **not** committed to the repo (everything under `data/raw/`
 is gitignored). Download [`ml-32m.zip`](https://grouplens.org/datasets/movielens/)
@@ -120,10 +112,10 @@ uv run python data/preprocess.py
 This writes `data/raw/movies.csv` (`movieId,title,genre`, one row per movie/genre
 pair) and `data/raw/ratings.csv` (`userId,movieId,rating`).
 
-### 6. Seed the database
+### 5. Seed the database
 
 Reads `data/raw/movies.csv` and `data/raw/ratings.csv` and loads
-genres/movies/users/ratings into MySQL:
+genres/movies/users/ratings into SQLite (the full seed produces a ~1.2 GB `instance/recsys.db`):
 
 ```bash
 uv run python data/seed.py                    # full seed (~32M ratings, a few minutes)
@@ -135,7 +127,7 @@ Users are synthesised from the ids in `ratings.csv` as placeholder rows (no
 credentials). The script targets whichever database the current `FLASK_ENV`
 resolves to, so it won't touch the test database unless asked.
 
-### 7. Run the app
+### 6. Run the app
 
 ```bash
 uv run flask run
@@ -171,8 +163,8 @@ With coverage:
 uv run pytest --cov=app
 ```
 
-Tests run against a separate test database/config (`FLASK_ENV=testing`) so they never touch dev
-data.
+Tests run against a separate config (`FLASK_ENV=testing`) backed by an in-memory SQLite database
+(`TEST_DATABASE_URL=sqlite://`), so they never touch `instance/recsys.db`.
 
 ## Linting
 
@@ -187,7 +179,7 @@ uv run ruff format --check .   # verify formatting (what CI runs)
 `.github/workflows/ci.yml` runs on every push and pull request against `main`, in two jobs:
 
 - **lint** — `ruff check` + `ruff format --check`
-- **test** — `pytest --cov=app` against a throwaway MySQL 8 service container
+- **test** — `pytest --cov=app` against an in-memory SQLite database
 
 Merges into `main` should be gated on both jobs passing. That gate is repository configuration,
 not code: in GitHub go to **Settings → Branches → Add branch ruleset** (or **Branch protection
@@ -211,7 +203,6 @@ and dispatches to `rating_based` or `collaborative` service accordingly.
 ## Roadmap
 
 - [ ] Project scaffolding (Flask app factory, config, `pyproject.toml`/`uv.lock`, `.gitignore`)
-- [ ] Docker Compose for local MySQL
 - [x] DB schema: `User`, `Movie`, `Genre`, `Rating` models + first Alembic migration
 - [x] Seed script for MovieLens dataset (`data/preprocess.py` + `data/seed.py`)
 - [ ] Movie listing/search endpoints

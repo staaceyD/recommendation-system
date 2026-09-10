@@ -191,7 +191,7 @@ rules**) for `main`, enable **Require status checks to pass before merging**, an
 | Method | Endpoint                        | Description                                          |
 |--------|---------------------------------|-----------------------------------------------------|
 | GET    | `/movies`                       | List / search movies                                |
-| POST   | `/movies/<id>/rate`             | Rate a movie (body includes `user_id`)              |
+| POST   | `/movies/<id>/rate`             | Rate a movie (JSON body: `user_id`, `rating` 0.5–5.0) |
 | GET    | `/recommendations?user_id=<id>` | Get recommendations for the given user               |
 
 Every request carries the `user_id` of the acting user (query param or request body) — there is no
@@ -206,7 +206,7 @@ and dispatches to `rating_based` or `collaborative` service accordingly.
 - [x] DB schema: `User`, `Movie`, `Genre`, `Rating` models + first Alembic migration
 - [x] Seed script for MovieLens dataset (`data/preprocess.py` + `data/seed.py`)
 - [x] Movie listing/search endpoints (`GET /movies` — title search, genre filter, pagination)
-- [ ] Rating endpoint
+- [x] Rating endpoint (`POST /movies/<id>/rate` — upsert, 404 on unknown movie/user, no user creation)
 - [ ] Rating-based recommendation service (for users with ratings)
 - [ ] Collaborative filtering recommendation service (cold-start users)
 - [ ] `/recommendations` endpoint wiring both strategies together

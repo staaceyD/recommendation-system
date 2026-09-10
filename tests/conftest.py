@@ -4,7 +4,7 @@ import pytest
 
 from app import create_app
 from app.extensions import db
-from app.models import Genre, Movie
+from app.models import Genre, Movie, User
 from data import seed
 
 
@@ -41,6 +41,17 @@ def make_movie(_app):
         db.session.add(movie)
         db.session.commit()
         return movie
+
+    return _make
+
+
+@pytest.fixture
+def make_user(_app):
+    def _make(user_id=None):
+        user = User(id=user_id)
+        db.session.add(user)
+        db.session.commit()
+        return user
 
     return _make
 

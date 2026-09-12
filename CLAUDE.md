@@ -7,22 +7,21 @@ Guidance for Claude Code when working in this repository.
 Movie recommender web app: Flask backend, SQLite database (a single file, `instance/recsys.db` —
 no server), seeded from the MovieLens dataset.
 Recommendation strategy is hybrid:
-- User has existing ratings → recommend from that rating history.
-- User has no ratings (cold start) → fall back to collaborative filtering over the full ratings
-  matrix.
+- User is in the trained model → recommend from their learned embedding (TensorFlow
+  matrix-factorization model, trained offline by `app/ml/train.py`).
+- User is unknown to the model (new / not in training) → `collaborative` cold-start fallback
+  (Bayesian-adjusted popularity, genre-aware).
 
 Full plan and roadmap live in `README.md` — treat it as the source of truth for scope and
 build order, and keep its checklist up to date as work lands.
 
-**Status:** DB scaffolding exists: `app/` (app factory, config, extensions) and SQLAlchemy models
-(`User`, `Movie`, `Genre`, `Rating`, plus the `movie_genres` join table) with the first Alembic
-migration applied to `instance/recsys.db`. Tests run against an in-memory SQLite DB. The MovieLens
-`ml-32m` dataset is downloaded locally into `data/raw/` (gitignored, never committed);
-`data/preprocess.py`
-converts the raw CSVs into the shape `data/seed.py` loads, and the seed script parses those and
-loads genres/movies/users/ratings — MovieLens `movieId`/`userId` are reused as primary keys, users
-are placeholder rows built from the ids in `ratings.csv`. No routes, auth, or tests have been
-written yet — don't assume any other planned structure in the README exists until you check.
+**Status:** working vertical slice. App factory + config + SQLAlchemy models (`User`, `Movie`,
+`Genre`, `Rating`, `movie_genres`) with Alembic migrations against `instance/recsys.db`; tests run
+against in-memory SQLite. Endpoints: `GET /movies`, `POST /movies/<id>/rate`, `GET /recommendations`.
+`app/ml/` is the Keras matrix-factorization model + offline training script; the trained artifact
+lives in `instance/mf/` (gitignored). `app/services/{rating_based,collaborative}.py` are the two
+recommenders, dispatched thinly from the `/recommendations` route. MovieLens `movieId`/`userId` are
+reused as primary keys; users are placeholder rows from `ratings.csv`. No auth.
 
 ## Commands
 
@@ -33,6 +32,7 @@ uv sync                        # install/update deps into .venv from pyproject.t
 uv run flask run               # run the dev server
 uv run flask db upgrade        # apply migrations
 uv run python data/seed.py     # seed the DB
+uv run python -m app.ml.train   # train the recommender model -> instance/mf/
 uv run pytest                  # run tests
 uv run pytest --cov=app        # run tests with coverage
 uv run ruff check .            # lint (CI gate)
@@ -50,11 +50,13 @@ The database is a local SQLite file, configured through `DATABASE_URL` in `.env`
 ## Conventions
 
 - Config via environment variables / `.env` (python-dotenv), never hardcoded credentials.
-- Two independent recommendation services are expected: a rating-history-based one and a
-  collaborative-filtering one, dispatched from a single `/recommendations` endpoint based on
-  whether the requesting user has ratings. Keep that dispatch logic thin — the branching belongs
-  in one place, not scattered across routes.
+- Two independent recommendation services: `rating_based` (trained-model inference) and
+  `collaborative` (cold-start). Dispatched thinly from the `/recommendations` route — try the
+  model, fall back to cold-start. Keep that branching in the one place, not scattered across routes.
+- Training is offline only. The app loads a saved artifact from `instance/mf/`; it never trains
+  on a request. `MODEL_DIR` env var overrides the artifact location (tests point it at a tmp dir).
 - Tests run against a separate test DB/config, never the dev database. Tests that seed must load
-  only a handful of rows (tiny fixture CSVs), never the full dataset.
+  only a handful of rows (tiny fixture CSVs), never the full dataset. Model tests train a tiny
+  model on fixture data — keep them small (few epochs, `dim` ~8).
 - Keep comments and docstrings minimal — only what isn't obvious from the code. One-line docstrings
   where a docstring earns its place; skip them on self-explanatory helpers and tests.

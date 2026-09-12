@@ -10,7 +10,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "pandas>=2.2",
     "numpy>=1.26",
-    "scikit-learn>=1.4",
+    "tensorflow>=2.21.0",
 ]
 
 [dependency-groups]
@@ -25,6 +25,10 @@ package = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = [
+    # keras 3 + numpy 2: TF passes copy= to __array__; harmless, upstream's to fix
+    "ignore:__array__ implementation doesn't accept a copy keyword:DeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py311"

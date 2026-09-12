@@ -84,6 +84,23 @@ def reset_tables(cursor) -> None:
         cursor.execute(f"DELETE FROM {table}")
 
 
+def drop_secondary_indexes(cursor, table: str) -> list[tuple[str, str]]:
+    """Drop explicitly-created indexes on ``table``; return ``(name, create_sql)`` to rebuild.
+
+    Constraint-backed indexes (the ``(user_id, movie_id)`` unique) have a NULL
+    ``sql`` in ``sqlite_master`` and are left alone.
+    """
+    cursor.execute(
+        "SELECT name, sql FROM sqlite_master "
+        "WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL",
+        (table,),
+    )
+    indexes = cursor.fetchall()
+    for name, _ in indexes:
+        cursor.execute(f"DROP INDEX {name}")
+    return indexes
+
+
 def load_movies_and_genres(cursor) -> set[int]:
     """Populate ``genres``, ``movies``, ``movie_genres``. Return the set of movie ids."""
     titles: dict[int, str] = {}
@@ -265,9 +282,19 @@ def main(argv: list[str] | None = None) -> int:
             valid_movie_ids = load_movies_and_genres(cursor)
             raw.commit()
 
+            # Drop the secondary index over ratings for the bulk load and rebuild it
+            # once at the end -- far cheaper than maintaining it per INSERT. The
+            # (user_id, movie_id) unique index has to stay (INSERT OR IGNORE needs it).
+            dropped = drop_secondary_indexes(cursor, "ratings")
+            raw.commit()
+
             print("Loading users and ratings...")
             load_users_and_ratings(raw, cursor, valid_movie_ids, args.ratings_limit)
+            raw.commit()
 
+            for name, sql in dropped:
+                print(f"Rebuilding index {name}...")
+                cursor.execute(sql)
             raw.commit()
 
             print("Final row counts:")

@@ -3,7 +3,12 @@ from app.extensions import db
 
 class Rating(db.Model):
     __tablename__ = "ratings"
-    __table_args__ = (db.UniqueConstraint("user_id", "movie_id", name="uq_rating_user_movie"),)
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "movie_id", name="uq_rating_user_movie"),
+        # Covering index for the item side: GROUP BY movie_id with AVG(rating)
+        # reads only the index. Also serves plain movie_id lookups (leftmost col).
+        db.Index("ix_ratings_movie_id_rating", "movie_id", "rating"),
+    )
 
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)

@@ -50,6 +50,15 @@ def test_prefers_genres_the_user_has_rated(popular, make_user, make_rating):
     assert recs[0] == popular["flop"].id  # the only other Drama title
 
 
+def test_ignores_genres_the_user_rated_poorly(popular, make_user, make_rating):
+    user = make_user()
+    make_rating(user, popular["niche"], 1.0)  # Drama, but disliked
+
+    recs = collaborative.recommend(user.id, limit=2)
+
+    assert recs[0] == popular["hit"].id  # plain popularity order, no Drama steer
+
+
 def test_backfills_when_the_genre_pool_is_too_small(popular, make_user, make_rating):
     user = make_user()
     make_rating(user, popular["flop"], 4.0)  # Drama; only "niche" left in Drama

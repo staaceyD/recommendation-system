@@ -1,4 +1,5 @@
 from flask import Blueprint, jsonify, request
+from sqlalchemy.orm import selectinload
 
 from app.extensions import db
 from app.models import Movie
@@ -25,10 +26,8 @@ def recommendations():
         movie_ids = collaborative.recommend(user_id, limit)
         strategy = "collaborative"
 
-    movies = {
-        m.id: m
-        for m in db.session.execute(db.select(Movie).where(Movie.id.in_(movie_ids))).scalars()
-    }
+    query = db.select(Movie).options(selectinload(Movie.genres)).where(Movie.id.in_(movie_ids))
+    movies = {m.id: m for m in db.session.execute(query).scalars()}
     return jsonify(
         user_id=user_id,
         strategy=strategy,

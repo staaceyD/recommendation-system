@@ -33,23 +33,26 @@ class MFArtifact:
             model = keras.models.load_model(path / MODEL_FILE)
             vocab = json.loads((path / VOCAB_FILE).read_text())
             meta = json.loads((path / META_FILE).read_text())
-        except (OSError, ValueError):
+            users = Vocab(vocab["user_ids"])
+            movies = Vocab(vocab["movie_ids"])
+            global_mean = float(meta["global_mean"])
+        except (OSError, ValueError, KeyError, TypeError):
             # A save interrupted mid-write (killed process, full disk) leaves a torn
             # artifact -- treat it as absent rather than crashing the request.
             return None
 
-        return cls(
-            model,
-            Vocab(vocab["user_ids"]),
-            Vocab(vocab["movie_ids"]),
-            float(meta["global_mean"]),
-        )
+        if not _shapes_agree(model, users, movies):
+            return None
+        return cls(model, users, movies, global_mean)
 
     def knows_user(self, user_id: int) -> bool:
         return user_id in self.users
 
     def rank_unseen(self, user_id: int, seen: set[int], limit: int) -> list[int]:
         """Movie ids with the highest predicted rating for the user, excluding `seen`."""
+        if limit <= 0:
+            return []
+
         user_index = self.users.to_index(user_id)
         if user_index is None:
             return []
@@ -71,3 +74,13 @@ class MFArtifact:
         top = np.argpartition(-predicted, limit - 1)[:limit]
         top = top[np.argsort(-predicted[top])]
         return [self.movies.ids[movie_indices[i]] for i in top]
+
+
+def _shapes_agree(model, users: Vocab, movies: Vocab) -> bool:
+    """Reject an artifact whose model and vocabularies come from different runs."""
+    try:
+        num_users = model.get_layer("user_embedding").input_dim
+        num_movies = model.get_layer("movie_embedding").input_dim
+    except ValueError:
+        return False
+    return num_users == len(users) and num_movies == len(movies)

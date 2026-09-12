@@ -28,8 +28,9 @@ def _clean_db(_app):
     yield
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def model_dir(tmp_path, monkeypatch):
+    """Every test gets its own artifact dir -- never the developer's instance/mf/."""
     path = tmp_path / "mf"
     monkeypatch.setenv("MODEL_DIR", str(path))
     return path

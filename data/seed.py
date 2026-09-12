@@ -288,14 +288,18 @@ def main(argv: list[str] | None = None) -> int:
             dropped = drop_secondary_indexes(cursor, "ratings")
             raw.commit()
 
-            print("Loading users and ratings...")
-            load_users_and_ratings(raw, cursor, valid_movie_ids, args.ratings_limit)
-            raw.commit()
-
-            for name, sql in dropped:
-                print(f"Rebuilding index {name}...")
-                cursor.execute(sql)
-            raw.commit()
+            try:
+                print("Loading users and ratings...")
+                load_users_and_ratings(raw, cursor, valid_movie_ids, args.ratings_limit)
+                raw.commit()
+            finally:
+                # Rebuild even if the load failed or was interrupted: the migration
+                # that created these indexes is already recorded as applied, so
+                # `flask db upgrade` would not bring them back.
+                for name, sql in dropped:
+                    print(f"Rebuilding index {name}...")
+                    cursor.execute(sql)
+                raw.commit()
 
             print("Final row counts:")
             for table, count in table_counts(cursor).items():

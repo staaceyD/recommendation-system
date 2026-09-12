@@ -1,9 +1,12 @@
 import json
 
 import numpy as np
+import pytest
 
 from app.ml.artifact import META_FILE, MODEL_FILE, VOCAB_FILE, MFArtifact
 from app.ml.model import build_model
+from app.ml.train import _save
+from app.ml.vocab import Vocab
 
 
 def test_build_model_scores_one_value_per_pair():
@@ -39,6 +42,49 @@ def test_load_returns_none_for_a_torn_save(preferences, train_model, model_dir):
     (model_dir / VOCAB_FILE).unlink()  # simulates a save killed mid-write
 
     assert MFArtifact.load(model_dir) is None
+
+
+def test_a_failed_save_leaves_the_previous_artifact_in_place(preferences, train_model, model_dir):
+    train_model(epochs=1)
+    before = (model_dir / VOCAB_FILE).read_text()
+
+    class Exploding:
+        def save(self, _path):
+            raise RuntimeError("disk full")
+
+    class FakeHistory:
+        history = {"rmse": [0.5]}
+
+    with pytest.raises(RuntimeError):
+        _save(model_dir, Exploding(), Vocab([1]), Vocab([2]), 3.5, 8, FakeHistory(), 1)
+
+    assert (model_dir / VOCAB_FILE).read_text() == before
+    assert MFArtifact.load(model_dir) is not None
+    assert [p.name for p in model_dir.parent.iterdir()] == [model_dir.name]
+
+
+def test_load_returns_none_for_incomplete_metadata(preferences, train_model, model_dir):
+    train_model(epochs=1)
+    (model_dir / META_FILE).write_text(json.dumps({"dim": 8}))  # global_mean never written
+
+    assert MFArtifact.load(model_dir) is None
+
+
+def test_load_rejects_a_vocab_from_another_run(preferences, train_model, model_dir):
+    train_model(epochs=1)
+    vocab = json.loads((model_dir / VOCAB_FILE).read_text())
+    vocab["movie_ids"].append(999_999)  # stale vocab left behind by an older run
+    (model_dir / VOCAB_FILE).write_text(json.dumps(vocab))
+
+    assert MFArtifact.load(model_dir) is None
+
+
+def test_rank_unseen_ignores_a_non_positive_limit(preferences, train_model, model_dir):
+    train_model(epochs=1)
+    artifact = MFArtifact.load(model_dir)
+
+    assert artifact.rank_unseen(preferences["target"].id, seen=set(), limit=0) == []
+    assert artifact.rank_unseen(preferences["target"].id, seen=set(), limit=-5) == []
 
 
 def test_model_learns_the_rating_gap(preferences, train_model, model_dir):

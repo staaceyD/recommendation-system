@@ -3,12 +3,13 @@
 Used when the trained model has no embedding for the user (new user, or nobody
 in the training data). Ranks movies by a Bayesian-adjusted mean rating so a
 handful of 5-star ratings can't beat a genuinely popular title, and -- if the
-user has rated anything at all -- prefers movies sharing those genres.
+user has rated anything highly -- prefers movies sharing those genres.
 """
 
 from __future__ import annotations
 
 import threading
+import time
 from collections import defaultdict
 
 from app.extensions import db
@@ -21,17 +22,26 @@ DEFAULT_LIMIT = 20
 MIN_RATINGS = 50
 PRIOR_STRENGTH = 50
 
-_ranking: dict[tuple[int, int], list[tuple[int, frozenset[int]]]] = {}
+# Ratings at or above this count as "liked" for the genre preference.
+LIKED_RATING = 3.5
+
+# The ranking aggregates the whole ratings table, so it can't be rebuilt per
+# request -- cache it, but expire it so new ratings do eventually show up.
+CACHE_TTL_SECONDS = 900
+
+_ranking: list[tuple[int, frozenset[int]]] | None = None
+_built_at = 0.0
 _lock = threading.Lock()
 
 
 def recommend(user_id: int, limit: int = DEFAULT_LIMIT) -> list[int]:
     ranking = _get_ranking()
 
-    seen = set(
-        db.session.execute(db.select(Rating.movie_id).where(Rating.user_id == user_id)).scalars()
-    )
-    liked_genres = _genres_of(seen)
+    rated = db.session.execute(
+        db.select(Rating.movie_id, Rating.rating).where(Rating.user_id == user_id)
+    ).all()
+    seen = {movie_id for movie_id, _ in rated}
+    liked_genres = _genres_of({mid for mid, rating in rated if rating >= LIKED_RATING})
 
     picks = _take(ranking, limit, exclude=seen, genres=liked_genres)
     if len(picks) < limit:  # genre filter too tight -- backfill on pure popularity
@@ -65,12 +75,17 @@ def _genres_of(movie_ids: set[int]) -> set[int]:
 
 
 def _get_ranking() -> list[tuple[int, frozenset[int]]]:
-    key = (MIN_RATINGS, PRIOR_STRENGTH)
-    if key not in _ranking:
+    global _ranking, _built_at
+    if _stale():
         with _lock:
-            if key not in _ranking:  # another thread may have built it while we waited
-                _ranking[key] = _build_ranking()
-    return _ranking[key]
+            if _stale():  # another thread may have built it while we waited
+                _ranking = _build_ranking()
+                _built_at = time.monotonic()
+    return _ranking
+
+
+def _stale() -> bool:
+    return _ranking is None or time.monotonic() - _built_at >= CACHE_TTL_SECONDS
 
 
 def _build_ranking() -> list[tuple[int, frozenset[int]]]:
@@ -103,4 +118,6 @@ def _bayesian(count: int, avg: float, overall_mean: float, prior: int) -> float:
 
 
 def reset() -> None:
-    _ranking.clear()
+    """Drop the cached ranking (tests, or after a bulk ratings change)."""
+    global _ranking, _built_at
+    _ranking, _built_at = None, 0.0

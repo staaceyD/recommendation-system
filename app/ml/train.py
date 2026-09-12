@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -83,25 +86,58 @@ def train(
 
 
 def _save(out_dir, model, users, movies, global_mean, dim, history, num_ratings):
+    """Write the three artifact files into a staging dir, then swap it into place.
+
+    Writing them straight into `out_dir` would let an interrupted run leave a new
+    `model.keras` beside the previous run's `vocab.json` -- an artifact that loads
+    but predicts against the wrong ids.
+    """
     path = Path(out_dir)
-    path.mkdir(parents=True, exist_ok=True)
-    model.save(path / MODEL_FILE)
-    (path / VOCAB_FILE).write_text(json.dumps({"user_ids": users.ids, "movie_ids": movies.ids}))
-    (path / META_FILE).write_text(
-        json.dumps(
-            {
-                "dim": dim,
-                "global_mean": global_mean,
-                "num_users": len(users),
-                "num_movies": len(movies),
-                "num_ratings": num_ratings,
-                "final_rmse": float(history.history["rmse"][-1]),
-                "final_val_rmse": float(history.history.get("val_rmse", [float("nan")])[-1]),
-                "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
-            },
-            indent=2,
+    path.parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=f".{path.name}-", dir=path.parent))
+    try:
+        val_rmse = history.history.get("val_rmse")
+        model.save(staging / MODEL_FILE)
+        (staging / VOCAB_FILE).write_text(
+            json.dumps({"user_ids": users.ids, "movie_ids": movies.ids})
         )
-    )
+        (staging / META_FILE).write_text(
+            json.dumps(
+                {
+                    "dim": dim,
+                    "global_mean": global_mean,
+                    "num_users": len(users),
+                    "num_movies": len(movies),
+                    "num_ratings": num_ratings,
+                    "final_rmse": float(history.history["rmse"][-1]),
+                    "final_val_rmse": float(val_rmse[-1]) if val_rmse else None,
+                    "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                },
+                indent=2,
+            )
+        )
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    _swap(staging, path)
+
+
+def _swap(staging: Path, path: Path) -> None:
+    """Move the staged artifact onto `path`, keeping the old one until it lands."""
+    backup = path.parent / f".{path.name}-previous"
+    shutil.rmtree(backup, ignore_errors=True)
+    if path.exists():
+        os.replace(path, backup)
+    try:
+        os.replace(staging, path)
+    except OSError:
+        if backup.exists():
+            os.replace(backup, path)
+        raise
+    finally:
+        shutil.rmtree(backup, ignore_errors=True)
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,5 +169,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     sys.exit(main())

@@ -1,0 +1,465 @@
+{
+  "info": {
+    "_postman_id": "8f2b4f4a-6a1e-4f4e-9d2c-1c3a7b5d0e11",
+    "name": "Movie Recommender API",
+    "description": "Flask movie-recommender API (see README.md).\n\n**Setup**\n\n1. `uv run flask db upgrade && uv run python data/seed.py`\n2. `uv run flask run` (defaults to http://127.0.0.1:5000)\n3. Optionally `uv run python -m app.ml.train` so `/recommendations` can use the trained model; without an artifact in `instance/mf/` every user falls back to the `collaborative` cold-start strategy.\n\n**Variables** — edit under the collection's Variables tab: `baseUrl`, `userId` (a user present in the trained model), `newUserId` (a user the model has never seen), `movieId`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://127.0.0.1:5000",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "newUserId",
+      "value": "999999",
+      "type": "string"
+    },
+    {
+      "key": "movieId",
+      "value": "1",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Movies",
+      "item": [
+        {
+          "name": "List movies",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/movies",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies"]
+            },
+            "description": "Paginated movie list, ordered by id.\n\nQuery params (all optional):\n- `q` — case-insensitive substring match on title\n- `genre` — exact genre name, e.g. `Comedy`\n- `page` — 1-based, default `1`\n- `per_page` — default `20`, clamped to `1..100`"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/movies",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["movies"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"movies\": [\n    {\n      \"id\": 1,\n      \"title\": \"Toy Story (1995)\",\n      \"genres\": [\"Adventure\", \"Animation\", \"Children\", \"Comedy\", \"Fantasy\"]\n    },\n    {\n      \"id\": 2,\n      \"title\": \"Jumanji (1995)\",\n      \"genres\": [\"Adventure\", \"Children\", \"Fantasy\"]\n    }\n  ],\n  \"page\": 1,\n  \"per_page\": 20,\n  \"total\": 9742\n}"
+            }
+          ]
+        },
+        {
+          "name": "List movies - search by title",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/movies?q=story",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies"],
+              "query": [
+                { "key": "q", "value": "story", "description": "case-insensitive substring of the title" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List movies - filter by genre",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/movies?genre=Comedy",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies"],
+              "query": [
+                { "key": "genre", "value": "Comedy", "description": "exact genre name" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List movies - paginated",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/movies?page=2&per_page=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies"],
+              "query": [
+                { "key": "page", "value": "2", "description": "1-based page number" },
+                { "key": "per_page", "value": "5", "description": "clamped to 1..100" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List movies - search + genre combined",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/movies?q=star&genre=Sci-Fi&per_page=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies"],
+              "query": [
+                { "key": "q", "value": "star" },
+                { "key": "genre", "value": "Sci-Fi" },
+                { "key": "per_page", "value": "10" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Rate a movie",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/movies/{{movieId}}/rate",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies", "{{movieId}}", "rate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}},\n  \"rating\": 4.5\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "Create or update one user's rating of one movie (upsert).\n\nBody:\n- `user_id` (int, required) — must already exist\n- `rating` (number, required) — 0.5 to 5.0 in 0.5 steps\n\nReturns `201` on first rating, `200` when an existing rating is overwritten."
+          },
+          "response": [
+            {
+              "name": "201 Created",
+              "originalRequest": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "url": {
+                  "raw": "{{baseUrl}}/movies/{{movieId}}/rate",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["movies", "{{movieId}}", "rate"]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"user_id\": 1,\n  \"rating\": 4.5\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              },
+              "status": "Created",
+              "code": 201,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"user_id\": 1,\n  \"movie_id\": 1,\n  \"rating\": 4.5,\n  \"rated_at\": \"2026-09-12T10:15:30.123456+00:00\"\n}"
+            },
+            {
+              "name": "200 OK (rating updated)",
+              "originalRequest": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "url": {
+                  "raw": "{{baseUrl}}/movies/{{movieId}}/rate",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["movies", "{{movieId}}", "rate"]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"user_id\": 1,\n  \"rating\": 3.0\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"user_id\": 1,\n  \"movie_id\": 1,\n  \"rating\": 3.0,\n  \"rated_at\": \"2026-09-12T10:17:02.998877+00:00\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Rate a movie - invalid rating (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/movies/{{movieId}}/rate",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies", "{{movieId}}", "rate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}},\n  \"rating\": 4.2\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "description": "`4.2` is not a 0.5 step, so the request is rejected."
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "url": {
+                  "raw": "{{baseUrl}}/movies/1/rate",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["movies", "1", "rate"]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"user_id\": 1,\n  \"rating\": 4.2\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              },
+              "status": "BAD REQUEST",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"error\": \"rating must be between 0.5 and 5.0 in 0.5 steps\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Rate a movie - missing user_id (400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/movies/{{movieId}}/rate",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies", "{{movieId}}", "rate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 4.0\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "url": {
+                  "raw": "{{baseUrl}}/movies/1/rate",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["movies", "1", "rate"]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"rating\": 4.0\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              },
+              "status": "BAD REQUEST",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"error\": \"user_id is required and must be an integer\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Rate a movie - unknown movie (404)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Accept", "value": "application/json" }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/movies/99999999/rate",
+              "host": ["{{baseUrl}}"],
+              "path": ["movies", "99999999", "rate"]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{userId}},\n  \"rating\": 4.0\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "POST",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "url": {
+                  "raw": "{{baseUrl}}/movies/99999999/rate",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["movies", "99999999", "rate"]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"user_id\": 1,\n  \"rating\": 4.0\n}",
+                  "options": { "raw": { "language": "json" } }
+                }
+              },
+              "status": "NOT FOUND",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"error\": \"movie 99999999 not found\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Recommendations",
+      "item": [
+        {
+          "name": "Get recommendations",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations?user_id={{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["recommendations"],
+              "query": [
+                { "key": "user_id", "value": "{{userId}}", "description": "required, integer" }
+              ]
+            },
+            "description": "Hybrid dispatch: if the user is in the trained model the response comes back with `strategy: \"rating_based\"`; otherwise it falls back to the genre-aware popularity cold start (`strategy: \"collaborative\"`)."
+          },
+          "response": [
+            {
+              "name": "200 OK (trained model)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/recommendations?user_id=1",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["recommendations"],
+                  "query": [{ "key": "user_id", "value": "1" }]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"user_id\": 1,\n  \"strategy\": \"rating_based\",\n  \"recommendations\": [\n    {\n      \"id\": 318,\n      \"title\": \"Shawshank Redemption, The (1994)\",\n      \"genres\": [\"Crime\", \"Drama\"]\n    },\n    {\n      \"id\": 296,\n      \"title\": \"Pulp Fiction (1994)\",\n      \"genres\": [\"Comedy\", \"Crime\", \"Drama\", \"Thriller\"]\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get recommendations - limit",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations?user_id={{userId}}&limit=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["recommendations"],
+              "query": [
+                { "key": "user_id", "value": "{{userId}}" },
+                { "key": "limit", "value": "5", "description": "default 20, clamped to 1..100" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "Get recommendations - cold start user",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations?user_id={{newUserId}}&limit=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["recommendations"],
+              "query": [
+                { "key": "user_id", "value": "{{newUserId}}", "description": "a user the trained model has never seen" },
+                { "key": "limit", "value": "10" }
+              ]
+            },
+            "description": "A user the model does not know falls through to the `collaborative` recommender."
+          },
+          "response": [
+            {
+              "name": "200 OK (cold start)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/recommendations?user_id=999999&limit=10",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["recommendations"],
+                  "query": [
+                    { "key": "user_id", "value": "999999" },
+                    { "key": "limit", "value": "10" }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"user_id\": 999999,\n  \"strategy\": \"collaborative\",\n  \"recommendations\": [\n    {\n      \"id\": 356,\n      \"title\": \"Forrest Gump (1994)\",\n      \"genres\": [\"Comedy\", \"Drama\", \"Romance\", \"War\"]\n    }\n  ]\n}"
+            }
+          ]
+        },
+        {
+          "name": "Get recommendations - missing user_id (400)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/recommendations",
+              "host": ["{{baseUrl}}"],
+              "path": ["recommendations"]
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/recommendations",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["recommendations"]
+                }
+              },
+              "status": "BAD REQUEST",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"error\": \"user_id is required and must be an integer\"\n}"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -48,6 +48,8 @@ recommendation-system/
 │   ├── raw/                   # MovieLens CSVs: ml-32m/ source + preprocessed output (gitignored)
 │   ├── preprocess.py          # raw ml-32m CSVs -> the shape seed.py loads
 │   └── seed.py                # loads raw/ into SQLite
+├── docs/
+│   └── recsys.postman_collection.json  # Postman/Insomnia collection for every endpoint
 ├── instance/                   # recsys.db + mf/ (trained model) live here (gitignored)
 ├── migrations/                 # Alembic migrations
 ├── tests/
@@ -217,6 +219,15 @@ registration, login, or session handling in this service.
 `GET /recommendations` is the core endpoint. It tries `rating_based` (the trained model) first and
 falls back to `collaborative` (cold-start) when that returns nothing; the response's `strategy`
 field says which ran.
+
+### API client collection
+
+`docs/recsys.postman_collection.json` is a ready-to-run collection covering every endpoint, with
+query-param and JSON body templates plus saved response examples (including the 400/404 cases).
+Import it into **Postman** (*Import → File*) or **Insomnia** (*Import → From File* — it reads the
+Postman v2.1 format), then set the collection variables: `baseUrl` (default
+`http://127.0.0.1:5000`), `userId`, `newUserId` (a user the trained model has never seen, to
+exercise the cold-start path), and `movieId`.
 
 ## How the model works
 

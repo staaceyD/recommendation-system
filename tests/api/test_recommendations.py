@@ -14,7 +14,7 @@ def test_user_id_is_required(client):
     assert client.get("/recommendations?user_id=abc").status_code == 400
 
 
-def test_falls_back_to_collaborative_without_a_model(client, preferences):
+def test_falls_back_to_collaborative_without_a_model(client, preferences, model_dir):
     body = client.get("/recommendations?user_id=999999").get_json()
 
     assert body["strategy"] == "collaborative"

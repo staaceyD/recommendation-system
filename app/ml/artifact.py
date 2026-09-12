@@ -24,14 +24,20 @@ class MFArtifact:
     @classmethod
     def load(cls, model_dir: str | Path) -> MFArtifact | None:
         path = Path(model_dir)
-        if not (path / MODEL_FILE).exists():
+        if not all((path / f).exists() for f in (MODEL_FILE, VOCAB_FILE, META_FILE)):
             return None
 
         import keras
 
-        model = keras.models.load_model(path / MODEL_FILE)
-        vocab = json.loads((path / VOCAB_FILE).read_text())
-        meta = json.loads((path / META_FILE).read_text())
+        try:
+            model = keras.models.load_model(path / MODEL_FILE)
+            vocab = json.loads((path / VOCAB_FILE).read_text())
+            meta = json.loads((path / META_FILE).read_text())
+        except (OSError, ValueError):
+            # A save interrupted mid-write (killed process, full disk) leaves a torn
+            # artifact -- treat it as absent rather than crashing the request.
+            return None
+
         return cls(
             model,
             Vocab(vocab["user_ids"]),

@@ -7,6 +7,8 @@ to it -- the dispatcher then falls back to `collaborative`.
 
 from __future__ import annotations
 
+import threading
+
 from app.extensions import db
 from app.models import Rating
 
@@ -14,6 +16,7 @@ DEFAULT_LIMIT = 20
 
 _artifact = None
 _loaded = False
+_lock = threading.Lock()
 
 
 def recommend(user_id: int, limit: int = DEFAULT_LIMIT) -> list[int]:
@@ -30,11 +33,13 @@ def recommend(user_id: int, limit: int = DEFAULT_LIMIT) -> list[int]:
 def _get_artifact():
     global _artifact, _loaded
     if not _loaded:
-        from app.ml.artifact import MFArtifact
-        from app.ml.paths import model_dir
+        with _lock:
+            if not _loaded:  # another thread may have loaded it while we waited
+                from app.ml.artifact import MFArtifact
+                from app.ml.paths import model_dir
 
-        _artifact = MFArtifact.load(model_dir())
-        _loaded = True
+                _artifact = MFArtifact.load(model_dir())
+                _loaded = True
     return _artifact
 
 

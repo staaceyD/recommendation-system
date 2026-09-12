@@ -8,6 +8,7 @@ user has rated anything at all -- prefers movies sharing those genres.
 
 from __future__ import annotations
 
+import threading
 from collections import defaultdict
 
 from app.extensions import db
@@ -21,6 +22,7 @@ MIN_RATINGS = 50
 PRIOR_STRENGTH = 50
 
 _ranking: dict[tuple[int, int], list[tuple[int, frozenset[int]]]] = {}
+_lock = threading.Lock()
 
 
 def recommend(user_id: int, limit: int = DEFAULT_LIMIT) -> list[int]:
@@ -39,6 +41,8 @@ def recommend(user_id: int, limit: int = DEFAULT_LIMIT) -> list[int]:
 
 def _take(ranking, limit, *, exclude, genres):
     out = []
+    if limit <= 0:
+        return out
     for movie_id, movie_genre_ids in ranking:
         if movie_id in exclude:
             continue
@@ -63,31 +67,35 @@ def _genres_of(movie_ids: set[int]) -> set[int]:
 def _get_ranking() -> list[tuple[int, frozenset[int]]]:
     key = (MIN_RATINGS, PRIOR_STRENGTH)
     if key not in _ranking:
-        stats = db.session.execute(
-            db.select(Rating.movie_id, db.func.count(), db.func.avg(Rating.rating))
-            .group_by(Rating.movie_id)
-            .having(db.func.count() >= MIN_RATINGS)
-        ).all()
-        total = sum(count for _, count, _ in stats)
-        overall_mean = sum(count * avg for _, count, avg in stats) / total if total else 0.0
-
-        genres_by_movie = defaultdict(set)
-        for movie_id, genre_id in db.session.execute(
-            db.select(movie_genres.c.movie_id, movie_genres.c.genre_id)
-        ):
-            genres_by_movie[movie_id].add(genre_id)
-
-        scored = sorted(
-            (
-                (_bayesian(count, avg, overall_mean, PRIOR_STRENGTH), movie_id)
-                for movie_id, count, avg in stats
-            ),
-            reverse=True,
-        )
-        _ranking[key] = [
-            (movie_id, frozenset(genres_by_movie.get(movie_id, ()))) for _, movie_id in scored
-        ]
+        with _lock:
+            if key not in _ranking:  # another thread may have built it while we waited
+                _ranking[key] = _build_ranking()
     return _ranking[key]
+
+
+def _build_ranking() -> list[tuple[int, frozenset[int]]]:
+    stats = db.session.execute(
+        db.select(Rating.movie_id, db.func.count(), db.func.avg(Rating.rating))
+        .group_by(Rating.movie_id)
+        .having(db.func.count() >= MIN_RATINGS)
+    ).all()
+    total = sum(count for _, count, _ in stats)
+    overall_mean = sum(count * avg for _, count, avg in stats) / total if total else 0.0
+
+    genres_by_movie = defaultdict(set)
+    for movie_id, genre_id in db.session.execute(
+        db.select(movie_genres.c.movie_id, movie_genres.c.genre_id)
+    ):
+        genres_by_movie[movie_id].add(genre_id)
+
+    scored = sorted(
+        (
+            (_bayesian(count, avg, overall_mean, PRIOR_STRENGTH), movie_id)
+            for movie_id, count, avg in stats
+        ),
+        reverse=True,
+    )
+    return [(movie_id, frozenset(genres_by_movie.get(movie_id, ()))) for _, movie_id in scored]
 
 
 def _bayesian(count: int, avg: float, overall_mean: float, prior: int) -> float:

@@ -1,7 +1,7 @@
 from app.services import rating_based
 
 
-def test_no_model_returns_empty(make_user):
+def test_no_model_returns_empty(make_user, model_dir):
     assert rating_based.recommend(make_user().id) == []
 
 
@@ -22,7 +22,7 @@ def test_excludes_seen_and_respects_limit(preferences, train_model):
 
 
 def test_ranks_the_liked_genre_higher(preferences, train_model):
-    train_model(epochs=120)
+    train_model(epochs=40)
     unseen_action = {preferences["action"][4].id, preferences["action"][5].id}
 
     recs = rating_based.recommend(preferences["target"].id, limit=4)

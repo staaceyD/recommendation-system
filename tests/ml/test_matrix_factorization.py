@@ -34,8 +34,15 @@ def test_load_returns_none_without_a_trained_model(model_dir):
     assert MFArtifact.load(model_dir) is None
 
 
+def test_load_returns_none_for_a_torn_save(preferences, train_model, model_dir):
+    train_model(epochs=1)
+    (model_dir / VOCAB_FILE).unlink()  # simulates a save killed mid-write
+
+    assert MFArtifact.load(model_dir) is None
+
+
 def test_model_learns_the_rating_gap(preferences, train_model, model_dir):
-    train_model(epochs=120)
+    train_model(epochs=40)
     artifact = MFArtifact.load(model_dir)
     target = preferences["target"].id
 

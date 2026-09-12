@@ -58,3 +58,7 @@ def test_backfills_when_the_genre_pool_is_too_small(popular, make_user, make_rat
 
     assert len(recs) == 3
     assert popular["flop"].id not in recs
+
+
+def test_zero_limit_returns_nothing(popular):
+    assert collaborative.recommend(999, limit=0) == []

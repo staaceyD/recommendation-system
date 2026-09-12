@@ -4,11 +4,13 @@ A movie recommender web app built with **Flask** and **SQLite**. The database is
 public movie ratings dataset ([MovieLens](https://grouplens.org/datasets/movielens/)). For any
 given user:
 
-- If the user has **rated movies already**, recommendations are generated from that rating
-  history (similar movies / similar users based on what they've rated).
-- If the user is **new and has no ratings yet**, recommendations fall back to **collaborative
-  filtering** over the full ratings matrix (e.g. popularity among similar user cohorts) to give a
-  reasonable cold-start experience.
+- If the user was in the **trained model** (a TensorFlow matrix-factorization model fit offline
+  on the ratings table), recommendations come from their learned embedding — the movies with the
+  highest predicted rating that they haven't seen.
+- If the user is **unknown to the model** (new, or nobody in the training data), recommendations
+  fall back to a **collaborative** cold-start ranking: the most popular, well-rated movies
+  (Bayesian-adjusted so a few 5-star ratings can't beat a genuinely popular title), preferring
+  genres the user has already rated.
 
 Every endpoint receives a `user_id` from the caller — this app does not manage authentication or
 create users. Users are the placeholder rows loaded by the seed script from the MovieLens dataset.
@@ -18,13 +20,12 @@ create users. Users are the placeholder rows loaded by the seed script from the 
 - **Backend:** Python 3.11+, Flask
 - **Database:** SQLite (a single file, `instance/recsys.db` — no server to run)
 - **ORM / migrations:** Flask-SQLAlchemy, Flask-Migrate (Alembic)
-- **ML / data:** pandas, numpy, scikit-learn (and/or `implicit` / `surprise` for matrix
-  factorization CF)
+- **ML:** TensorFlow / Keras (matrix-factorization model), pandas, numpy
 - **Testing:** pytest, pytest-cov
 - **Config:** python-dotenv
 - **Env / package management:** [uv](https://docs.astral.sh/uv/)
 
-## Project structure (planned)
+## Project structure
 
 ```
 recommendation-system/
@@ -32,22 +33,24 @@ recommendation-system/
 │   ├── __init__.py            # app factory
 │   ├── config.py              # config classes (Dev/Test/Prod)
 │   ├── extensions.py          # db, migrate instances
-│   ├── models/                # SQLAlchemy models: User, Movie, Rating
-│   ├── routes/                # Flask blueprints (movies, ratings, recommendations)
-│   └── services/
-│       ├── rating_based.py    # recs from a user's own rating history
-│       └── collaborative.py   # collaborative filtering for cold-start users
+│   ├── models/                # SQLAlchemy models: User, Movie, Genre, Rating
+│   ├── routes/                # Flask blueprints (movies, recommendations)
+│   ├── services/
+│   │   ├── rating_based.py    # recs from the trained model's user embeddings
+│   │   └── collaborative.py   # popularity-based cold-start fallback
+│   └── ml/
+│       ├── model.py           # the Keras matrix-factorization model
+│       ├── train.py           # offline training script (python -m app.ml.train)
+│       ├── artifact.py        # load a trained model for inference
+│       ├── data.py            # pull ratings out of the DB
+│       └── vocab.py           # user/movie id <-> embedding index
 ├── data/
 │   ├── raw/                   # MovieLens CSVs: ml-32m/ source + preprocessed output (gitignored)
 │   ├── preprocess.py          # raw ml-32m CSVs -> the shape seed.py loads
 │   └── seed.py                # loads raw/ into SQLite
-├── instance/                   # recsys.db lives here (gitignored)
+├── instance/                   # recsys.db + mf/ (trained model) live here (gitignored)
 ├── migrations/                 # Alembic migrations
 ├── tests/
-│   ├── conftest.py
-│   ├── test_models.py
-│   ├── test_routes.py
-│   └── test_recommenders.py
 ├── .env.example
 ├── pyproject.toml              # deps + uv config
 ├── uv.lock                     # uv lockfile (committed)
@@ -127,7 +130,21 @@ Users are synthesised from the ids in `ratings.csv` as placeholder rows (no
 credentials). The script targets whichever database the current `FLASK_ENV`
 resolves to, so it won't touch the test database unless asked.
 
-### 6. Run the app
+### 6. Train the recommender
+
+```bash
+uv run python -m app.ml.train                     # full training -> instance/mf/
+uv run python -m app.ml.train --limit 2000000     # quick partial run
+uv run python -m app.ml.train --epochs 3 --dim 16 # smaller / faster
+```
+
+Training is **offline** — the app never trains on a request. It reads the `ratings`
+table, fits the matrix-factorization model, and writes `instance/mf/`
+(`model.keras` + `vocab.json` + `meta.json`). `GET /recommendations` loads that
+artifact on first use; retrain and restart to pick up a new one. Without a trained
+model every user falls through to the collaborative cold-start path.
+
+### 7. Run the app
 
 ```bash
 uv run flask run
@@ -186,19 +203,37 @@ not code: in GitHub go to **Settings → Branches → Add branch ruleset** (or *
 rules**) for `main`, enable **Require status checks to pass before merging**, and select the
 `lint` and `test` checks (they appear in the list after the workflow has run once).
 
-## API endpoints (planned)
+## API endpoints
 
 | Method | Endpoint                        | Description                                          |
 |--------|---------------------------------|-----------------------------------------------------|
-| GET    | `/movies`                       | List / search movies                                |
+| GET    | `/movies`                       | List / search movies (`q`, `genre`, `page`, `per_page`) |
 | POST   | `/movies/<id>/rate`             | Rate a movie (JSON body: `user_id`, `rating` 0.5–5.0) |
-| GET    | `/recommendations?user_id=<id>` | Get recommendations for the given user               |
+| GET    | `/recommendations?user_id=<id>` | Recommendations for the user (`limit` optional)      |
 
 Every request carries the `user_id` of the acting user (query param or request body) — there is no
 registration, login, or session handling in this service.
 
-`GET /recommendations` is the core endpoint: it checks whether the given user has existing ratings
-and dispatches to `rating_based` or `collaborative` service accordingly.
+`GET /recommendations` is the core endpoint. It tries `rating_based` (the trained model) first and
+falls back to `collaborative` (cold-start) when that returns nothing; the response's `strategy`
+field says which ran.
+
+## How the model works
+
+`app/ml/` is a textbook **matrix factorization** recommender in Keras. Every user and every movie
+gets a learned vector (an embedding) plus a scalar bias; the predicted rating is
+
+```
+global_mean + user_vec · movie_vec + user_bias + movie_bias
+```
+
+`app/ml/train.py` fits it against `rating - global_mean` with MSE loss (so RMSE is the quality
+metric), shuffles, holds out a validation split, and saves the model + id vocabularies to
+`instance/mf/`. At request time `rating_based` loads that once per process and, for a known user,
+scores every unseen movie through the model and returns the top `limit`.
+
+`tests/ml/` trains a tiny model on synthetic separable data each run — no committed model blob,
+nothing mocked — so the training and inference paths are actually exercised in CI.
 
 ## Roadmap
 
@@ -207,10 +242,10 @@ and dispatches to `rating_based` or `collaborative` service accordingly.
 - [x] Seed script for MovieLens dataset (`data/preprocess.py` + `data/seed.py`)
 - [x] Movie listing/search endpoints (`GET /movies` — title search, genre filter, pagination)
 - [x] Rating endpoint (`POST /movies/<id>/rate` — upsert, 404 on unknown movie/user, no user creation)
-- [ ] Rating-based recommendation service (for users with ratings)
-- [ ] Collaborative filtering recommendation service (cold-start users)
-- [ ] `/recommendations` endpoint wiring both strategies together
-- [ ] Test suite (models, routes, both recommenders)
+- [x] Rating-based recommendation service — TensorFlow matrix-factorization model (`app/ml/`, `app/services/rating_based.py`)
+- [x] Collaborative cold-start service (`app/services/collaborative.py` — Bayesian-adjusted popularity)
+- [x] `/recommendations` endpoint dispatching model → cold-start fallback
+- [ ] Test suite (models, routes, both recommenders) — routes + recommenders done; model tests in `tests/ml/`
 - [x] CI (lint + tests on push / PR — `.github/workflows/ci.yml`)
 
 ## Contributing

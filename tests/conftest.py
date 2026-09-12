@@ -4,7 +4,8 @@ import pytest
 
 from app import create_app
 from app.extensions import db
-from app.models import Genre, Movie, User
+from app.models import Genre, Movie, Rating, User
+from app.services import collaborative, rating_based
 from data import seed
 
 
@@ -18,10 +19,35 @@ def _app():
 
 @pytest.fixture(autouse=True)
 def _clean_db(_app):
+    db.session.remove()
     for table in reversed(db.metadata.sorted_tables):
         db.session.execute(table.delete())
     db.session.commit()
+    rating_based.reset()
+    collaborative.reset()
     yield
+
+
+@pytest.fixture(autouse=True)
+def model_dir(tmp_path, monkeypatch):
+    """Every test gets its own artifact dir -- never the developer's instance/mf/."""
+    path = tmp_path / "mf"
+    monkeypatch.setenv("MODEL_DIR", str(path))
+    return path
+
+
+@pytest.fixture
+def train_model(model_dir):
+    def _train(**overrides):
+        from app.ml.train import train
+
+        opts = {"dim": 8, "epochs": 40, "batch_size": 256, "validation_split": 0.0, "verbose": 0}
+        opts.update(overrides)
+        history = train(model_dir, **opts)
+        rating_based.reset()
+        return history
+
+    return _train
 
 
 @pytest.fixture
@@ -54,6 +80,55 @@ def make_user(_app):
         return user
 
     return _make
+
+
+@pytest.fixture
+def make_rating(_app):
+    def _make(user, movie, rating):
+        row = Rating(
+            user_id=getattr(user, "id", user),
+            movie_id=getattr(movie, "id", movie),
+            rating=rating,
+        )
+        db.session.add(row)
+        db.session.commit()
+        return row
+
+    return _make
+
+
+@pytest.fixture
+def preferences(make_movie, make_user, make_rating):
+    """Two clean taste groups: action fans and romance fans.
+
+    ``target`` is an action fan who has only rated the first four movies of each
+    genre, so the last two of each are unseen-but-learnable candidates.
+    """
+    action = [make_movie(f"Action {i}", ["Action"]) for i in range(6)]
+    romance = [make_movie(f"Romance {i}", ["Romance"]) for i in range(6)]
+    action_fans = [make_user() for _ in range(6)]
+    romance_fans = [make_user() for _ in range(6)]
+    target = action_fans[0]
+
+    for fan in action_fans:
+        seen_action = action[:4] if fan is target else action
+        seen_romance = romance[:4] if fan is target else romance
+        for movie in seen_action:
+            make_rating(fan, movie, 5.0)
+        for movie in seen_romance:
+            make_rating(fan, movie, 1.5)
+    for fan in romance_fans:
+        for movie in romance:
+            make_rating(fan, movie, 5.0)
+        for movie in action:
+            make_rating(fan, movie, 1.5)
+
+    return {
+        "action": action,
+        "romance": romance,
+        "target": target,
+        "all_users": action_fans + romance_fans,
+    }
 
 
 @pytest.fixture

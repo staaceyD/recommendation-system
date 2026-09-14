@@ -15,7 +15,12 @@ import keras
 from keras import layers
 
 EMBEDDING_DIM = 32
-L2 = 1e-6
+
+# Offline evaluation picked this: at 1e-6 the model overfits thinly-rated movies,
+# which then float to the top of a full-catalogue ranking (precision@10 0.064,
+# below the popularity baseline's 0.079); at 1e-4 and above the embeddings collapse
+# to zero and it degenerates into a bias-only popularity model. 1e-5 lands between.
+L2 = 1e-5
 
 
 def build_model(num_users: int, num_movies: int, dim: int = EMBEDDING_DIM, l2: float = L2):

@@ -24,7 +24,7 @@ import pandas as pd
 
 from app.ml.artifact import META_FILE, MODEL_FILE, VOCAB_FILE
 from app.ml.data import load_ratings
-from app.ml.model import EMBEDDING_DIM, build_model
+from app.ml.model import EMBEDDING_DIM, L2, build_model
 from app.ml.paths import model_dir
 from app.ml.vocab import Vocab
 
@@ -44,6 +44,7 @@ def train(
     batch_size: int = DEFAULT_BATCH_SIZE,
     learning_rate: float = DEFAULT_LEARNING_RATE,
     validation_split: float = DEFAULT_VALIDATION_SPLIT,
+    l2: float = L2,
     limit: int | None = None,
     verbose: int = 1,
 ):
@@ -70,7 +71,12 @@ def train(
     user_idx, movie_idx = user_idx[order], movie_idx[order]
     target = ratings[order] - global_mean
 
-    model = build_model(len(users), len(movies), dim=dim)
+    # Saved with the artifact so inference can skip movies with too little evidence
+    # behind their embedding -- see MIN_SUPPORT in app/ml/artifact.py.
+    counts = frame["movie_id"].value_counts()
+    movie_counts = [int(counts[movie_id]) for movie_id in movies.ids]
+
+    model = build_model(len(users), len(movies), dim=dim, l2=l2)
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate),
         loss="mse",
@@ -85,11 +91,11 @@ def train(
         verbose=verbose,
     )
 
-    _save(out_dir, model, users, movies, global_mean, dim, history, len(ratings))
+    _save(out_dir, model, users, movies, movie_counts, global_mean, dim, l2, history, len(ratings))
     return history
 
 
-def _save(out_dir, model, users, movies, global_mean, dim, history, num_ratings):
+def _save(out_dir, model, users, movies, movie_counts, global_mean, dim, l2, history, num_ratings):
     """Write the three artifact files into a staging dir, then swap it into place.
 
     Writing them straight into `out_dir` would let an interrupted run leave a new
@@ -103,12 +109,19 @@ def _save(out_dir, model, users, movies, global_mean, dim, history, num_ratings)
         val_rmse = history.history.get("val_rmse")
         model.save(staging / MODEL_FILE)
         (staging / VOCAB_FILE).write_text(
-            json.dumps({"user_ids": users.ids, "movie_ids": movies.ids})
+            json.dumps(
+                {
+                    "user_ids": users.ids,
+                    "movie_ids": movies.ids,
+                    "movie_counts": movie_counts,
+                }
+            )
         )
         (staging / META_FILE).write_text(
             json.dumps(
                 {
                     "dim": dim,
+                    "l2": l2,
                     "global_mean": global_mean,
                     "num_users": len(users),
                     "num_movies": len(movies),
@@ -151,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
+    parser.add_argument("--l2", type=float, default=L2, help="embedding regularization strength")
     parser.add_argument("--limit", type=int, default=None, metavar="N")
     args = parser.parse_args(argv)
 
@@ -166,6 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             epochs=args.epochs,
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
+            l2=args.l2,
             limit=args.limit,
         )
     print(f"Done. final RMSE {history.history['rmse'][-1]:.4f}")

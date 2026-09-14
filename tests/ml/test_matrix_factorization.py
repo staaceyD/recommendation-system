@@ -56,7 +56,7 @@ def test_a_failed_save_leaves_the_previous_artifact_in_place(preferences, train_
         history = {"rmse": [0.5]}
 
     with pytest.raises(RuntimeError):
-        _save(model_dir, Exploding(), Vocab([1]), Vocab([2]), 3.5, 8, FakeHistory(), 1)
+        _save(model_dir, Exploding(), Vocab([1]), Vocab([2]), [1], 3.5, 8, 1e-5, FakeHistory(), 1)
 
     assert (model_dir / VOCAB_FILE).read_text() == before
     assert MFArtifact.load(model_dir) is not None
@@ -120,6 +120,52 @@ def test_scoring_an_unknown_id(preferences, train_model, model_dir):
     assert artifact.scores(999_999) is None
     predicted = artifact.predict_pairs([999_999, preferences["target"].id], [known, 999_999])
     assert np.isnan(predicted).all()
+
+
+def test_the_support_filter_holds_back_thinly_rated_movies(preferences, train_model, model_dir):
+    train_model(epochs=5)
+    artifact = MFArtifact.load(model_dir)
+    target = preferences["target"].id
+    # every fixture movie has 12 ratings, so 13 excludes the catalogue entirely
+    well_supported = artifact.movie_counts >= 13
+
+    assert not well_supported.any()
+    assert artifact.rank_unseen(target, seen=set(), limit=3, min_support=13) != []
+    assert artifact.rank_unseen(target, seen=set(), limit=3, min_support=1) == artifact.rank_unseen(
+        target, seen=set(), limit=3, min_support=13
+    )
+
+
+def test_the_support_filter_ranks_well_supported_movies_first(
+    preferences, make_movie, make_user, make_rating, train_model, model_dir
+):
+    # one movie the target's own crowd adores, rated by only two of them
+    obscure = make_movie("Obscure Action", ["Action"])
+    for fan in preferences["all_users"][:2]:
+        make_rating(fan, obscure, 5.0)
+    train_model(epochs=40)
+    artifact = MFArtifact.load(model_dir)
+    target = preferences["target"].id
+
+    assert artifact.movie_counts[artifact.movies.index[obscure.id]] == 2
+
+    ranked = artifact.rank_unseen(target, seen=set(), limit=13, min_support=5)
+    well_supported = [
+        movie_id
+        for movie_id in ranked
+        if artifact.movie_counts[artifact.movies.index[movie_id]] >= 5
+    ]
+    assert ranked[: len(well_supported)] == well_supported  # backfill lands at the end
+    assert ranked.index(obscure.id) >= len(well_supported)
+
+
+def test_load_rejects_an_artifact_without_rating_counts(preferences, train_model, model_dir):
+    train_model(epochs=1)
+    vocab = json.loads((model_dir / VOCAB_FILE).read_text())
+    del vocab["movie_counts"]  # written by a version from before the support filter
+    (model_dir / VOCAB_FILE).write_text(json.dumps(vocab))
+
+    assert MFArtifact.load(model_dir) is None
 
 
 def test_model_learns_the_rating_gap(preferences, train_model, model_dir):

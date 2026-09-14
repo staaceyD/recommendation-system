@@ -140,6 +140,7 @@ resolves to, so it won't touch the test database unless asked.
 uv run python -m app.ml.train                     # full training -> instance/mf/
 uv run python -m app.ml.train --limit 2000000     # quick partial run
 uv run python -m app.ml.train --epochs 3 --dim 16 # smaller / faster
+uv run python -m app.ml.train --l2 1e-4           # stronger regularization
 ```
 
 Training is **offline** — the app never trains on a request. It reads the `ratings`
@@ -147,6 +148,9 @@ table, fits the matrix-factorization model, and writes `instance/mf/`
 (`model.keras` + `vocab.json` + `meta.json`). `GET /recommendations` loads that
 artifact on first use; retrain and restart to pick up a new one. Without a trained
 model every user falls through to the collaborative cold-start path.
+
+Raising `--epochs` past the default of 5 makes the *ranking* worse even though RMSE barely
+moves — see [Evaluation](#evaluation) before turning it up.
 
 ### 7. Check whether the recommendations are any good
 
@@ -254,7 +258,9 @@ global_mean + user_vec · movie_vec + user_bias + movie_bias
 `app/ml/train.py` fits it against `rating - global_mean` with MSE loss (so RMSE is the quality
 metric), shuffles, holds out a validation split, and saves the model + id vocabularies to
 `instance/mf/`. At request time `rating_based` loads that once per process and, for a known user,
-scores every unseen movie through the model and returns the top `limit`.
+scores every unseen movie through the model and returns the top `limit` — skipping movies with
+fewer than `MIN_SUPPORT` ratings behind their embedding, for the reasons in
+[Evaluation](#evaluation).
 
 `tests/ml/` trains a tiny model on synthetic separable data each run — no committed model blob,
 nothing mocked — so the training and inference paths are actually exercised in CI.
@@ -287,30 +293,50 @@ fitted on every rating in the table, so every held-out row would already be memo
 **What it currently says.** On a 1M-rating slice, 500 users, K=10:
 
 ```
-strategy                 prec@10   recall@10     ndcg@10      map@10      hit@10    coverage     novelty
-matrix-factorization      0.0640      0.0460      0.0857      0.0413      0.3860      0.0427     11.1618
-popularity                0.0786      0.0604      0.1034      0.0513      0.4460      0.0015      9.6283
-random                    0.0010      0.0002      0.0008      0.0002      0.0100      0.1854     17.5163
+strategy                   prec@10   recall@10     ndcg@10      map@10      hit@10    coverage     novelty
+model (support >= 100)      0.1126      0.0868      0.1491      0.0802      0.5360      0.0148      9.9621
+model (unfiltered)          0.0974      0.0713      0.1294      0.0678      0.4960      0.0156     10.9100
+popularity                  0.0786      0.0604      0.1034      0.0513      0.4460      0.0015      9.6283
+random                      0.0010      0.0002      0.0008      0.0002      0.0100      0.1854     17.5163
 
-Rating prediction on the holdout: RMSE 0.8369 (predicting the global mean every time: 1.0516)
+Rating prediction on the holdout: RMSE 0.8075 (predicting the global mean every time: 1.0516)
 ```
 
-The model clearly learns something — RMSE 0.84 against a 1.05 baseline, and it beats random by
-~60x — but it does **not** beat plain popularity at ranking. Two things are going on, and they
-pull in opposite directions:
+The model beats popularity on every ranking metric — ~43% more precision@10 — while recommending
+10x more of the catalogue (coverage 0.0148 against 0.0015), so it is genuinely personalising
+rather than imitating the baseline. It holds on a 4M-rating slice too, by a narrower margin
+(prec@10 0.0640 against 0.0508).
 
-- Offline top-N evaluation flatters popularity, because unrated ≠ disliked. A blockbuster is a
-  "hit" partly because it is the kind of film a user had the chance to rate at all. Popularity's
-  coverage of 0.0015 means it recommends the same ~50 titles to everyone; the model's 0.0427 means
-  it is personalising, and gets punished for it.
-- Training longer genuinely hurts the ranking. At 20 epochs precision@10 falls to 0.023 while RMSE
-  barely moves, and the median recommended movie drops from 445 training ratings to 87 — thinly
-  rated movies pick up extreme embeddings that MSE has almost no reason (`L2 = 1e-6`) to rein in,
-  and they float to the top of a full-catalogue ranking. RMSE alone never shows this.
+That was not true when the evaluation was first written. It reported `prec@10 = 0.064` against
+popularity's `0.079` — the model *lost*. What fixed it:
 
-Worth trying from here: a minimum-support filter at inference (as the cold-start path already
-does with `MIN_RATINGS`), meaningfully stronger L2, early stopping on a ranking metric rather than
-on loss, and a ranking loss (BPR / implicit-feedback) instead of MSE on explicit ratings.
+- **`L2 = 1e-6` → `1e-5`** (`app/ml/model.py`). At 1e-6, thinly-rated movies picked up overfitted
+  embeddings predicting extreme ratings, and floated to the top of a full-catalogue ranking. At
+  1e-4 and above the embeddings collapse to zero and the model degenerates into a bias-only
+  popularity clone (1e-4 and 1e-3 score identically). This alone took prec@10 to 0.097.
+- **A minimum-support filter at inference** (`MIN_SUPPORT = 100` in `app/ml/artifact.py`). A movie
+  costs `dim + 1` = 33 parameters, so an embedding fitted from a handful of ratings is
+  underdetermined. Movies under the threshold are held back and only used to top the list up if
+  too few well-supported ones remain — the same shape as the cold-start ranker backfilling past
+  its genre filter. Training stores the per-movie counts in `vocab.json`, so serving never has to
+  ask the database.
+
+Two honest caveats:
+
+- **Offline top-N flatters popularity**, because unrated ≠ disliked: a blockbuster scores as a
+  "hit" partly because it is the kind of film a user had the chance to rate at all. This cuts the
+  other way too — tuning `MIN_SUPPORT` upward keeps "improving" the metric (800 scores better than
+  100 on the 1M slice) purely by narrowing the catalogue until the model *is* the popularity
+  baseline, at 0.6% coverage. 100 is set on statistical grounds, not by chasing the number, and
+  the report always carries an unfiltered row so the cost of the filter stays visible.
+- **Training longer still hurts**, just no longer catastrophically: at 15 epochs prec@10 is 0.097
+  rather than 0.113 (before these fixes it collapsed to 0.026, far below the baseline). RMSE
+  barely moves either way, which is exactly why RMSE alone was never going to catch this.
+  `DEFAULT_EPOCHS = 5` stands.
+
+Worth trying from here: early stopping on a ranking metric rather than on loss, and a ranking loss
+(BPR / implicit feedback) instead of MSE on explicit ratings — MSE optimises rating accuracy, and
+ranking is what the app actually serves.
 
 ## Roadmap
 
@@ -325,7 +351,8 @@ on loss, and a ranking loss (BPR / implicit-feedback) instead of MSE on explicit
 - [ ] Test suite (models, routes, both recommenders) — routes + recommenders done; model tests in `tests/ml/`
 - [x] CI (lint + tests on push / PR — `.github/workflows/ci.yml`)
 - [x] Offline evaluation (`app/ml/evaluate.py` — per-user holdout, top-K metrics vs popularity/random baselines)
-- [ ] Close the gap the evaluation found: the model loses to popularity at ranking (see [Evaluation](#evaluation))
+- [x] Close the gap the evaluation found — stronger L2 + a minimum-support filter put the model ahead of popularity (see [Evaluation](#evaluation))
+- [ ] Rank-aware training: early stopping on NDCG, and a ranking loss (BPR) instead of MSE
 
 ## Contributing
 

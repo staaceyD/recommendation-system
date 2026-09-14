@@ -33,6 +33,7 @@ uv run flask run               # run the dev server
 uv run flask db upgrade        # apply migrations
 uv run python data/seed.py     # seed the DB
 uv run python -m app.ml.train   # train the recommender model -> instance/mf/
+uv run python -m app.ml.evaluate  # score the recommenders on a held-out split
 uv run pytest                  # run tests
 uv run pytest --cov=app        # run tests with coverage
 uv run ruff check .            # lint (CI gate)
@@ -55,6 +56,9 @@ The database is a local SQLite file, configured through `DATABASE_URL` in `.env`
   model, fall back to cold-start. Keep that branching in the one place, not scattered across routes.
 - Training is offline only. The app loads a saved artifact from `instance/mf/`; it never trains
   on a request. `MODEL_DIR` env var overrides the artifact location (tests point it at a tmp dir).
+- Evaluation (`app/ml/evaluate.py`) trains its own model on a held-out split and never scores
+  `instance/mf/` — that artifact saw every rating, so any holdout is already memorised. Report
+  ranking metrics against the popularity and random baselines, never on their own.
 - Tests run against a separate test DB/config, never the dev database. Tests that seed must load
   only a handful of rows (tiny fixture CSVs), never the full dataset. Model tests train a tiny
   model on fixture data — keep them small (few epochs, `dim` ~8).

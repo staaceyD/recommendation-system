@@ -41,6 +41,8 @@ recommendation-system/
 │   └── ml/
 │       ├── model.py           # the Keras matrix-factorization model
 │       ├── train.py           # offline training script (python -m app.ml.train)
+│       ├── evaluate.py        # offline evaluation (python -m app.ml.evaluate)
+│       ├── metrics.py         # top-K ranking metrics
 │       ├── artifact.py        # load a trained model for inference
 │       ├── data.py            # pull ratings out of the DB
 │       └── vocab.py           # user/movie id <-> embedding index
@@ -146,7 +148,18 @@ table, fits the matrix-factorization model, and writes `instance/mf/`
 artifact on first use; retrain and restart to pick up a new one. Without a trained
 model every user falls through to the collaborative cold-start path.
 
-### 7. Run the app
+### 7. Check whether the recommendations are any good
+
+```bash
+uv run python -m app.ml.evaluate                       # evaluate on the whole ratings table
+uv run python -m app.ml.evaluate --limit 2000000       # quick run on a slice
+uv run python -m app.ml.evaluate --k 20 --users 2000   # longer lists, more users
+uv run python -m app.ml.evaluate --json report.json    # also write the raw numbers
+```
+
+See [Evaluation](#evaluation) for what the numbers mean.
+
+### 8. Run the app
 
 ```bash
 uv run flask run
@@ -246,6 +259,59 @@ scores every unseen movie through the model and returns the top `limit`.
 `tests/ml/` trains a tiny model on synthetic separable data each run — no committed model blob,
 nothing mocked — so the training and inference paths are actually exercised in CI.
 
+## Evaluation
+
+`uv run python -m app.ml.evaluate` answers the question training RMSE can't: is the *list* the
+user actually sees any good?
+
+**How it works.** Each user's ratings are split — most train, a random 20% held out. A model is
+trained on the training half only, then asked for a top-K list per user, and scored on how much of
+that user's holdout it recovered (relevant = the user rated it 3.5 or higher). The same users and
+the same holdout are scored for two baselines: `popularity` (the Bayesian-adjusted ranking the
+cold-start fallback uses) and `random`. Absolute scores like "precision@10 = 0.08" mean nothing in
+isolation — the baselines are what make them readable.
+
+It always trains its own model and deliberately *cannot* score `instance/mf/`: that artifact was
+fitted on every rating in the table, so every held-out row would already be memorised.
+
+| Metric | Reads as |
+|--------|----------|
+| `prec@K` | Share of the K recommendations the user really liked |
+| `recall@K` | Share of everything they liked that the list caught |
+| `ndcg@K` | Position-weighted: 1.0 means every hit sits as high as it could |
+| `map@K` | Precision averaged over the hits — rewards hits near the top |
+| `hit@K` | Share of users whose list contained *anything* they liked |
+| `coverage` | Share of the catalogue ever recommended (0.001 = the same few hundred titles) |
+| `novelty` | Bits of surprise; low means blockbusters, high means the long tail |
+
+**What it currently says.** On a 1M-rating slice, 500 users, K=10:
+
+```
+strategy                 prec@10   recall@10     ndcg@10      map@10      hit@10    coverage     novelty
+matrix-factorization      0.0640      0.0460      0.0857      0.0413      0.3860      0.0427     11.1618
+popularity                0.0786      0.0604      0.1034      0.0513      0.4460      0.0015      9.6283
+random                    0.0010      0.0002      0.0008      0.0002      0.0100      0.1854     17.5163
+
+Rating prediction on the holdout: RMSE 0.8369 (predicting the global mean every time: 1.0516)
+```
+
+The model clearly learns something — RMSE 0.84 against a 1.05 baseline, and it beats random by
+~60x — but it does **not** beat plain popularity at ranking. Two things are going on, and they
+pull in opposite directions:
+
+- Offline top-N evaluation flatters popularity, because unrated ≠ disliked. A blockbuster is a
+  "hit" partly because it is the kind of film a user had the chance to rate at all. Popularity's
+  coverage of 0.0015 means it recommends the same ~50 titles to everyone; the model's 0.0427 means
+  it is personalising, and gets punished for it.
+- Training longer genuinely hurts the ranking. At 20 epochs precision@10 falls to 0.023 while RMSE
+  barely moves, and the median recommended movie drops from 445 training ratings to 87 — thinly
+  rated movies pick up extreme embeddings that MSE has almost no reason (`L2 = 1e-6`) to rein in,
+  and they float to the top of a full-catalogue ranking. RMSE alone never shows this.
+
+Worth trying from here: a minimum-support filter at inference (as the cold-start path already
+does with `MIN_RATINGS`), meaningfully stronger L2, early stopping on a ranking metric rather than
+on loss, and a ranking loss (BPR / implicit-feedback) instead of MSE on explicit ratings.
+
 ## Roadmap
 
 - [ ] Project scaffolding (Flask app factory, config, `pyproject.toml`/`uv.lock`, `.gitignore`)
@@ -258,6 +324,8 @@ nothing mocked — so the training and inference paths are actually exercised in
 - [x] `/recommendations` endpoint dispatching model → cold-start fallback
 - [ ] Test suite (models, routes, both recommenders) — routes + recommenders done; model tests in `tests/ml/`
 - [x] CI (lint + tests on push / PR — `.github/workflows/ci.yml`)
+- [x] Offline evaluation (`app/ml/evaluate.py` — per-user holdout, top-K metrics vs popularity/random baselines)
+- [ ] Close the gap the evaluation found: the model loses to popularity at ranking (see [Evaluation](#evaluation))
 
 ## Contributing
 

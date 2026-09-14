@@ -87,6 +87,41 @@ def test_rank_unseen_ignores_a_non_positive_limit(preferences, train_model, mode
     assert artifact.rank_unseen(preferences["target"].id, seen=set(), limit=-5) == []
 
 
+def test_scoring_from_the_weights_matches_the_model_graph(preferences, train_model, model_dir):
+    train_model(epochs=5)
+    artifact = MFArtifact.load(model_dir)
+    target = preferences["target"].id
+
+    movie_ids = artifact.movies.ids
+    graph = (
+        np.asarray(
+            artifact.model(
+                {
+                    "user": np.full(len(movie_ids), artifact.users.to_index(target), dtype="int64"),
+                    "movie": np.arange(len(movie_ids), dtype="int64"),
+                },
+                training=False,
+            )
+        ).reshape(-1)
+        + artifact.global_mean
+    )
+
+    assert artifact.scores(target) == pytest.approx(graph, abs=1e-4)
+    assert artifact.predict_pairs([target] * len(movie_ids), movie_ids) == pytest.approx(
+        graph, abs=1e-4
+    )
+
+
+def test_scoring_an_unknown_id(preferences, train_model, model_dir):
+    train_model(epochs=1)
+    artifact = MFArtifact.load(model_dir)
+    known = preferences["action"][0].id
+
+    assert artifact.scores(999_999) is None
+    predicted = artifact.predict_pairs([999_999, preferences["target"].id], [known, 999_999])
+    assert np.isnan(predicted).all()
+
+
 def test_model_learns_the_rating_gap(preferences, train_model, model_dir):
     train_model(epochs=40)
     artifact = MFArtifact.load(model_dir)

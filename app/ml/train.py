@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 
 from app.ml.artifact import META_FILE, MODEL_FILE, VOCAB_FILE
 from app.ml.data import load_ratings
@@ -37,6 +38,7 @@ SEED = 42
 def train(
     out_dir: str | Path,
     *,
+    frame: pd.DataFrame | None = None,
     dim: int = EMBEDDING_DIM,
     epochs: int = DEFAULT_EPOCHS,
     batch_size: int = DEFAULT_BATCH_SIZE,
@@ -45,11 +47,13 @@ def train(
     limit: int | None = None,
     verbose: int = 1,
 ):
+    """Fit on `frame`, or on the whole ratings table when it is omitted."""
     import keras
 
     keras.utils.set_random_seed(SEED)
 
-    frame = load_ratings(limit)
+    if frame is None:
+        frame = load_ratings(limit)
     if frame.empty:
         raise SystemExit("no ratings to train on -- seed the database first")
 

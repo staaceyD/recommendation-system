@@ -105,7 +105,7 @@ def _build_ranking() -> list[tuple[int, frozenset[int]]]:
 
     scored = sorted(
         (
-            (_bayesian(count, avg, overall_mean, PRIOR_STRENGTH), movie_id)
+            (bayesian_score(count, avg, overall_mean, PRIOR_STRENGTH), movie_id)
             for movie_id, count, avg in stats
         ),
         reverse=True,
@@ -113,7 +113,8 @@ def _build_ranking() -> list[tuple[int, frozenset[int]]]:
     return [(movie_id, frozenset(genres_by_movie.get(movie_id, ()))) for _, movie_id in scored]
 
 
-def _bayesian(count: int, avg: float, overall_mean: float, prior: int) -> float:
+def bayesian_score(count: int, avg: float, overall_mean: float, prior: int) -> float:
+    """A movie's mean rating pulled toward `overall_mean` by `prior` imaginary average ratings."""
     return (count * avg + prior * overall_mean) / (count + prior)
 
 

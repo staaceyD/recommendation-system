@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from app.ml import evaluate
+from app.ml.artifact import MIN_SUPPORT
 from app.ml.evaluate import (
     PopularityRecommender,
     RandomRecommender,
@@ -130,7 +131,7 @@ def result(taste_frame):
 
 def test_the_model_beats_random_on_separable_tastes(result):
     scores = {row["strategy"]: row for row in result["strategies"]}
-    model, chance = scores["matrix-factorization"], scores["random"]
+    model, chance = scores[f"model (support >= {MIN_SUPPORT})"], scores["random"]
 
     for metric in ("precision", "recall", "ndcg", "map"):
         assert model[metric] > 2 * chance[metric]
@@ -141,7 +142,8 @@ def test_every_strategy_is_scored_on_the_same_users(result):
     # a handful of the 120 users happen to hold out nothing they liked, and are dropped
     assert 100 <= result["users_scored"] <= 120
     assert {row["strategy"] for row in result["strategies"]} == {
-        "matrix-factorization",
+        f"model (support >= {MIN_SUPPORT})",
+        "model (unfiltered)",
         "popularity",
         "random",
     }
@@ -158,7 +160,7 @@ def test_report_reads_as_a_table(result):
     text = evaluate.format_report(result)
 
     assert "prec@10" in text
-    assert "matrix-factorization" in text
+    assert "model (unfiltered)" in text
     assert "random" in text
 
 

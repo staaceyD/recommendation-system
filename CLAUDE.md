@@ -59,6 +59,9 @@ The database is a local SQLite file, configured through `DATABASE_URL` in `.env`
 - Evaluation (`app/ml/evaluate.py`) trains its own model on a held-out split and never scores
   `instance/mf/` — that artifact saw every rating, so any holdout is already memorised. Report
   ranking metrics against the popularity and random baselines, never on their own.
+- Don't tune `MIN_SUPPORT` or `L2` by maximising precision@K: offline top-N rewards narrowing the
+  catalogue, and the limit of that is recommending only blockbusters — i.e. becoming the baseline.
+  Both are set on statistical grounds and justified in the README; check `coverage` alongside.
 - Tests run against a separate test DB/config, never the dev database. Tests that seed must load
   only a handful of rows (tiny fixture CSVs), never the full dataset. Model tests train a tiny
   model on fixture data — keep them small (few epochs, `dim` ~8).

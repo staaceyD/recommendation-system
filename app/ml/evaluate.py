@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 from app.ml import metrics
-from app.ml.artifact import MFArtifact
+from app.ml.artifact import MIN_SUPPORT, MFArtifact
 from app.ml.data import load_ratings
 from app.ml.model import EMBEDDING_DIM
 from app.ml.train import (
@@ -89,13 +89,13 @@ def split_ratings(
 class ModelRecommender:
     """The served path: `rating_based` ranking every unseen movie by predicted rating."""
 
-    name = "matrix-factorization"
-
-    def __init__(self, artifact: MFArtifact):
+    def __init__(self, artifact: MFArtifact, min_support: int = MIN_SUPPORT, name: str = "model"):
         self.artifact = artifact
+        self.min_support = min_support
+        self.name = name
 
     def recommend(self, user_id: int, seen: set[int], k: int) -> list[int]:
-        return self.artifact.rank_unseen(user_id, seen, k)
+        return self.artifact.rank_unseen(user_id, seen, k, self.min_support)
 
 
 class PopularityRecommender:
@@ -278,8 +278,13 @@ def run(
             "total_ratings": int(counts.sum()),
             "catalogue_size": len(artifact.movies),
         }
+        model = ModelRecommender(artifact, name=f"model (support >= {MIN_SUPPORT})")
+        unfiltered = ModelRecommender(artifact, min_support=0, name="model (unfiltered)")
         reports = [
-            score_recommender(ModelRecommender(artifact), cases, **shared),
+            score_recommender(model, cases, **shared),
+            # Kept in every report so the cost of the support filter stays visible:
+            # it buys accuracy by narrowing the catalogue, and that is a trade, not a win.
+            score_recommender(unfiltered, cases, **shared),
             score_recommender(PopularityRecommender(train_frame), cases, **shared),
             score_recommender(RandomRecommender(artifact.movies.ids, seed), cases, **shared),
         ]

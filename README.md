@@ -138,6 +138,7 @@ uv run flask run    # http://localhost:5000
 |--------|---------------------------------|------------------------------------------------------|
 | GET    | `/movies`                       | List / search movies (`q`, `genre`, `page`, `per_page`) |
 | POST   | `/movies/<id>/rate`             | Rate a movie (JSON body: `user_id`, `rating` 0.5–5.0) |
+| GET    | `/ratings`                      | Rated movies with their rating (`user_id`, `min_rating`, `max_rating`, `page`, `per_page`) |
 | GET    | `/recommendations?user_id=<id>` | Recommendations for the user (`limit` optional)      |
 
 `GET /recommendations` is the core endpoint: it tries `rating_based` (the trained model) first and

@@ -333,6 +333,181 @@
       ]
     },
     {
+      "name": "Ratings",
+      "item": [
+        {
+          "name": "List ratings",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/ratings",
+              "host": ["{{baseUrl}}"],
+              "path": ["ratings"]
+            },
+            "description": "Rated movies with the rating attached, highest first.\n\nQuery params (all optional):\n- `user_id` \u2014 only this user's ratings; `404` if that user does not exist\n- `min_rating` / `max_rating` \u2014 inclusive bounds, each within `0.5..5.0`\n- `page` \u2014 1-based, default `1`\n- `per_page` \u2014 default `20`, clamped to `1..100`"
+          },
+          "response": [
+            {
+              "name": "200 OK",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/ratings",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["ratings"]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"ratings\": [\n    {\n      \"user_id\": 1,\n      \"movie_id\": 1,\n      \"rating\": 4.0,\n      \"rated_at\": null,\n      \"movie\": {\n        \"id\": 1,\n        \"title\": \"Toy Story (1995)\",\n        \"genres\": [\n          \"Adventure\",\n          \"Animation\",\n          \"Children\",\n          \"Comedy\",\n          \"Fantasy\"\n        ]\n      }\n    },\n    {\n      \"user_id\": 1,\n      \"movie_id\": 3,\n      \"rating\": 4.0,\n      \"rated_at\": null,\n      \"movie\": {\n        \"id\": 3,\n        \"title\": \"Grumpier Old Men (1995)\",\n        \"genres\": [\n          \"Comedy\",\n          \"Romance\"\n        ]\n      }\n    }\n  ],\n  \"page\": 1,\n  \"per_page\": 20,\n  \"total\": 232\n}"
+            }
+          ]
+        },
+        {
+          "name": "List ratings - by user",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/ratings?user_id={{userId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["ratings"],
+              "query": [
+                { "key": "user_id", "value": "{{userId}}", "description": "only this user's ratings" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List ratings - rating range",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/ratings?min_rating=4&max_rating=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["ratings"],
+              "query": [
+                { "key": "min_rating", "value": "4", "description": "inclusive lower bound" },
+                { "key": "max_rating", "value": "5", "description": "inclusive upper bound" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List ratings - user + rating range",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/ratings?user_id={{userId}}&min_rating=4.5",
+              "host": ["{{baseUrl}}"],
+              "path": ["ratings"],
+              "query": [
+                { "key": "user_id", "value": "{{userId}}" },
+                { "key": "min_rating", "value": "4.5", "description": "what this user loved" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List ratings - paginated",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/ratings?user_id={{userId}}&page=2&per_page=5",
+              "host": ["{{baseUrl}}"],
+              "path": ["ratings"],
+              "query": [
+                { "key": "user_id", "value": "{{userId}}" },
+                { "key": "page", "value": "2", "description": "1-based page number" },
+                { "key": "per_page", "value": "5", "description": "clamped to 1..100" }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "List ratings - unknown user (404)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/ratings?user_id={{newUserId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["ratings"],
+              "query": [
+                { "key": "user_id", "value": "{{newUserId}}", "description": "a user that does not exist" }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "404 Not Found",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/ratings?user_id=999999",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["ratings"],
+                  "query": [{ "key": "user_id", "value": "999999" }]
+                }
+              },
+              "status": "NOT FOUND",
+              "code": 404,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"error\": \"user 999999 not found\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "List ratings - rating out of range (400)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Accept", "value": "application/json" }],
+            "url": {
+              "raw": "{{baseUrl}}/ratings?max_rating=6",
+              "host": ["{{baseUrl}}"],
+              "path": ["ratings"],
+              "query": [
+                { "key": "max_rating", "value": "6", "description": "outside 0.5..5.0" }
+              ]
+            }
+          },
+          "response": [
+            {
+              "name": "400 Bad Request",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "{{baseUrl}}/ratings?max_rating=6",
+                  "host": ["{{baseUrl}}"],
+                  "path": ["ratings"],
+                  "query": [{ "key": "max_rating", "value": "6" }]
+                }
+              },
+              "status": "BAD REQUEST",
+              "code": 400,
+              "_postman_previewlanguage": "json",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"error\": \"max_rating must be a number between 0.5 and 5.0\"\n}"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Recommendations",
       "item": [
         {

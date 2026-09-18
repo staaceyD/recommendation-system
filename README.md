@@ -176,8 +176,9 @@ global_mean + user_vec · movie_vec + user_bias + movie_bias
 `app/ml/train.py` fits it against `rating - global_mean` with MSE loss, and saves the model and id
 vocabularies to `instance/mf/`. At request time `rating_based` loads that once per process and,
 for a known user, scores every unseen movie and returns the top `limit` — skipping movies with
-fewer than `MIN_SUPPORT` ratings behind their embedding. Both `MIN_SUPPORT` and the `L2` strength
-were chosen by the evaluation below; the code comments record the numbers.
+fewer than `MIN_SUPPORT` ratings behind their embedding. `MIN_SUPPORT` was chosen by the
+evaluation below; the `L2` strength is *derived* from the size of the training set rather than
+fixed, for the reason in the next section. The code comments record the numbers.
 
 `tests/ml/` trains a tiny model on synthetic separable data each run — no committed model blob,
 nothing mocked — so training and inference are actually exercised in CI.
@@ -220,7 +221,47 @@ Rating prediction on the holdout: RMSE 0.8075 (predicting the global mean every 
 
 The model beats popularity on every ranking metric while recommending 10x more of the catalogue
 (coverage 0.0148 against 0.0015), so it is genuinely personalising rather than imitating the
-baseline. It holds on a 4M-rating slice by a narrower margin (prec@10 0.0640 against 0.0508).
+baseline.
+
+### Why `L2` is scaled to the dataset size
+
+That margin used to narrow as the slice grew, and at full size it vanished: the served model
+handed *every* user the same 20 titles — the global `movie_bias` ranking, which on MovieLens is
+nature documentaries and prestige classics. Personalisation was worth 0.0104 RMSE over a
+bias-only model, and user embeddings had ended up *smaller* than their random initialisation.
+
+The cause is that `embeddings_regularizer` penalises the whole embedding matrix on every step,
+while a row's data gradient arrives only on its own ratings — so the effective strength on a row
+with `c` ratings goes as `l2 * N / c`. Batch size cancels; dataset size does not. A fixed `l2`
+therefore means *more* regularization the more data you train on, until the embeddings are flat
+and the biases explain everything. Measured as the ratio of `movie_bias` spread to
+personalisation spread, at a fixed `l2 = 1e-5`:
+
+| ratings | 2M | 6M | 12M | 24M | 32M (full) |
+|---|---|---|---|---|---|
+| bias : personalisation | 2.6x | 7.8x | 14.6x | 36.4x | 56.0x |
+| distinct titles in 10 users' top-20 | 101 | 49 | 37 | 26 | ~21 |
+
+`scaled_l2` holds `l2 * N` fixed instead, which holds that ratio at ~2.5x across all of them. On a
+6M slice, 500 users, K=10 — the same run the old numbers above came from, one scale up:
+
+```
+strategy                   prec@10   recall@10     ndcg@10      map@10      hit@10    coverage     novelty
+model (support >= 100)      0.0850      0.0498      0.1071      0.0542      0.4360      0.0093     11.7415
+model (unfiltered)          0.0620      0.0339      0.0836      0.0424      0.3400      0.0075     15.3309
+popularity                  0.0542      0.0372      0.0654      0.0273      0.3540      0.0006     10.9797
+random                      0.0004      0.0002      0.0003      0.0001      0.0040      0.0979     19.7253
+
+Rating prediction on the holdout: RMSE 0.7817 (predicting the global mean every time: 1.0611)
+```
+
+Against the same slice with the old fixed `l2`, that is prec@10 0.0850 against 0.0450 — which had
+been *below* the popularity baseline's 0.0542.
+
+A per-observation penalty (`activity_regularizer`) is scale-invariant without any scaling, and was
+tried: it fails, because it gives up the support-proportional shrinkage that keeps thinly-rated
+movies from predicting extremes. At 6M it scored prec@10 0.038, below popularity, and 0.003
+unfiltered — barely above random.
 
 Two things to know before touching the knobs:
 
@@ -230,8 +271,11 @@ Two things to know before touching the knobs:
   the catalogue until the model *is* the popularity baseline, at 0.6% coverage. It is set on
   statistical grounds instead, and every report carries an unfiltered row so the filter's cost
   stays visible. Watch `coverage` alongside `prec@K`.
-- **Training longer hurts the ranking** while RMSE barely moves: 15 epochs gives prec@10 0.097
-  against 0.113 at the default of 5. RMSE alone was never going to catch that.
+- **Training longer used to hurt the ranking** while RMSE barely moved: 15 epochs gave prec@10
+  0.097 against 0.113 at the default of 5. That was measured before `L2` was scaled, when longer
+  training meant more steps of a penalty that was already too strong, so it needs re-measuring
+  before it is trusted again — the default of 5 epochs is inherited, not re-derived. RMSE alone
+  was never going to catch it either way.
 
 Worth trying next: early stopping on a ranking metric rather than on loss, and a ranking loss
 (BPR / implicit feedback) instead of MSE — MSE optimises rating accuracy, and ranking is what the

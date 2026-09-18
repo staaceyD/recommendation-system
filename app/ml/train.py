@@ -24,7 +24,7 @@ import pandas as pd
 
 from app.ml.artifact import META_FILE, MODEL_FILE, VOCAB_FILE
 from app.ml.data import load_ratings
-from app.ml.model import EMBEDDING_DIM, L2, build_model
+from app.ml.model import EMBEDDING_DIM, build_model, scaled_l2
 from app.ml.paths import model_dir
 from app.ml.vocab import Vocab
 
@@ -44,7 +44,7 @@ def train(
     batch_size: int = DEFAULT_BATCH_SIZE,
     learning_rate: float = DEFAULT_LEARNING_RATE,
     validation_split: float = DEFAULT_VALIDATION_SPLIT,
-    l2: float = L2,
+    l2: float | None = None,
     limit: int | None = None,
     verbose: int = 1,
 ):
@@ -57,6 +57,10 @@ def train(
         frame = load_ratings(limit)
     if frame.empty:
         raise SystemExit("no ratings to train on -- seed the database first")
+
+    # Has to come from the frame, not a constant: see scaled_l2 in app/ml/model.py.
+    if l2 is None:
+        l2 = scaled_l2(len(frame))
 
     users = Vocab(sorted(frame["user_id"].unique().tolist()))
     movies = Vocab(sorted(frame["movie_id"].unique().tolist()))
@@ -164,7 +168,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--learning-rate", type=float, default=DEFAULT_LEARNING_RATE)
-    parser.add_argument("--l2", type=float, default=L2, help="embedding regularization strength")
+    parser.add_argument(
+        "--l2",
+        type=float,
+        default=None,
+        help="embedding regularization strength (default: scaled to the dataset size)",
+    )
     parser.add_argument("--limit", type=int, default=None, metavar="N")
     args = parser.parse_args(argv)
 

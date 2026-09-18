@@ -16,9 +16,12 @@ META_FILE = "meta.json"
 # A movie costs `dim + 1` parameters (33 by default), so a handful of ratings leaves
 # them badly underdetermined -- and an overfitted embedding predicts extreme ratings,
 # which is exactly what floats a movie to the top of a full-catalogue ranking.
-# Offline evaluation: at 100, precision@10 goes 0.097 -> 0.113 and the model finally
-# clears the popularity baseline. The cold-start ranker refuses movies under 50
-# ratings for the same reason; an embedding needs more evidence than an average does.
+# The filter still earns its place after L2 was scaled to the dataset size: on a 6M
+# slice it is precision@10 0.085 filtered against 0.062 unfiltered. The value itself
+# is inherited from before that fix -- it was picked against a model whose embeddings
+# had been squeezed flat, so 100 has not been re-derived, only re-checked. The
+# cold-start ranker refuses movies under 50 ratings for the same reason; an embedding
+# needs more evidence than an average does.
 MIN_SUPPORT = 100
 
 

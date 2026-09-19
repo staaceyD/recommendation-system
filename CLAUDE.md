@@ -12,9 +12,6 @@ Recommendation strategy is hybrid:
 - User is unknown to the model (new / not in training) → `collaborative` cold-start fallback
   (Bayesian-adjusted popularity, genre-aware).
 
-Full plan and roadmap live in `README.md` — treat it as the source of truth for scope and
-build order, and keep its checklist up to date as work lands.
-
 **Status:** working vertical slice. App factory + config + SQLAlchemy models (`User`, `Movie`,
 `Genre`, `Rating`, `movie_genres`) with Alembic migrations against `instance/recsys.db`; tests run
 against in-memory SQLite. Endpoints: `GET /movies`, `POST /movies/<id>/rate`, `GET /recommendations`.

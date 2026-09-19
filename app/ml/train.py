@@ -24,7 +24,7 @@ import pandas as pd
 
 from app.ml.artifact import META_FILE, MODEL_FILE, VOCAB_FILE
 from app.ml.data import load_ratings
-from app.ml.model import EMBEDDING_DIM, build_model, scaled_l2
+from app.ml.model import EMBEDDING_DIM, build_model, scaled_bias_l2, scaled_l2
 from app.ml.paths import model_dir
 from app.ml.vocab import Vocab
 
@@ -45,6 +45,7 @@ def train(
     learning_rate: float = DEFAULT_LEARNING_RATE,
     validation_split: float = DEFAULT_VALIDATION_SPLIT,
     l2: float | None = None,
+    bias_l2: float | None = None,
     limit: int | None = None,
     verbose: int = 1,
 ):
@@ -61,6 +62,8 @@ def train(
     # Has to come from the frame, not a constant: see scaled_l2 in app/ml/model.py.
     if l2 is None:
         l2 = scaled_l2(len(frame))
+    if bias_l2 is None:
+        bias_l2 = scaled_bias_l2(len(frame))
 
     users = Vocab(sorted(frame["user_id"].unique().tolist()))
     movies = Vocab(sorted(frame["movie_id"].unique().tolist()))
@@ -80,7 +83,7 @@ def train(
     counts = frame["movie_id"].value_counts()
     movie_counts = [int(counts[movie_id]) for movie_id in movies.ids]
 
-    model = build_model(len(users), len(movies), dim=dim, l2=l2)
+    model = build_model(len(users), len(movies), dim=dim, l2=l2, bias_l2=bias_l2)
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate),
         loss="mse",
@@ -95,11 +98,35 @@ def train(
         verbose=verbose,
     )
 
-    _save(out_dir, model, users, movies, movie_counts, global_mean, dim, l2, history, len(ratings))
+    _save(
+        out_dir,
+        model,
+        users,
+        movies,
+        movie_counts,
+        global_mean,
+        dim,
+        l2,
+        bias_l2,
+        history,
+        len(ratings),
+    )
     return history
 
 
-def _save(out_dir, model, users, movies, movie_counts, global_mean, dim, l2, history, num_ratings):
+def _save(
+    out_dir,
+    model,
+    users,
+    movies,
+    movie_counts,
+    global_mean,
+    dim,
+    l2,
+    bias_l2,
+    history,
+    num_ratings,
+):
     """Write the three artifact files into a staging dir, then swap it into place.
 
     Writing them straight into `out_dir` would let an interrupted run leave a new
@@ -126,6 +153,7 @@ def _save(out_dir, model, users, movies, movie_counts, global_mean, dim, l2, his
                 {
                     "dim": dim,
                     "l2": l2,
+                    "bias_l2": bias_l2,
                     "global_mean": global_mean,
                     "num_users": len(users),
                     "num_movies": len(movies),
@@ -174,6 +202,12 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="embedding regularization strength (default: scaled to the dataset size)",
     )
+    parser.add_argument(
+        "--bias-l2",
+        type=float,
+        default=None,
+        help="bias regularization strength (default: BIAS_L2_MULTIPLIER x --l2)",
+    )
     parser.add_argument("--limit", type=int, default=None, metavar="N")
     args = parser.parse_args(argv)
 
@@ -190,6 +224,7 @@ def main(argv: list[str] | None = None) -> int:
             batch_size=args.batch_size,
             learning_rate=args.learning_rate,
             l2=args.l2,
+            bias_l2=args.bias_l2,
             limit=args.limit,
         )
     print(f"Done. final RMSE {history.history['rmse'][-1]:.4f}")

@@ -16,12 +16,14 @@ META_FILE = "meta.json"
 # A movie costs `dim + 1` parameters (33 by default), so a handful of ratings leaves
 # them badly underdetermined -- and an overfitted embedding predicts extreme ratings,
 # which is exactly what floats a movie to the top of a full-catalogue ranking.
-# The filter still earns its place after L2 was scaled to the dataset size: on a 6M
-# slice it is precision@10 0.085 filtered against 0.062 unfiltered. The value itself
-# is inherited from before that fix -- it was picked against a model whose embeddings
-# had been squeezed flat, so 100 has not been re-derived, only re-checked. The
-# cold-start ranker refuses movies under 50 ratings for the same reason; an embedding
-# needs more evidence than an average does.
+# This filter used to be load-bearing: on a 6M slice it was precision@10 0.085 filtered
+# against 0.062 unfiltered. Most of that gap was it covering for unregularized biases --
+# once those carry L2 too (see app/ml/model.py) the same slice is 0.100 against 0.098, so
+# the filter is now worth a rounding error rather than a third of the score. Keep it: an
+# embedding still needs more evidence than an average does, which is why the cold-start
+# ranker refuses movies under 50 ratings. But it is no longer propping anything up, and
+# the value of 100 has never been derived -- it was picked against a model with flattened
+# embeddings and has only ever been re-checked since.
 MIN_SUPPORT = 100
 
 

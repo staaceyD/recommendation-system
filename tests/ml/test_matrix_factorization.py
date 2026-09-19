@@ -71,7 +71,19 @@ def test_a_failed_save_leaves_the_previous_artifact_in_place(preferences, train_
         history = {"rmse": [0.5]}
 
     with pytest.raises(RuntimeError):
-        _save(model_dir, Exploding(), Vocab([1]), Vocab([2]), [1], 3.5, 8, 1e-5, FakeHistory(), 1)
+        _save(
+            model_dir,
+            Exploding(),
+            Vocab([1]),
+            Vocab([2]),
+            [1],
+            3.5,
+            8,
+            1e-5,
+            1e-5,
+            FakeHistory(),
+            1,
+        )
 
     assert (model_dir / VOCAB_FILE).read_text() == before
     assert MFArtifact.load(model_dir) is not None

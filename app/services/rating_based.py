@@ -1,8 +1,8 @@
-"""Recommendations for users the trained model has learned an embedding for.
+"""Recommendations for users the trained model knows.
 
-Loads the matrix-factorization artifact once per process and ranks unseen movies
-by predicted rating. Returns `[]` when there is no model or the user is unknown
-to it -- the dispatcher then falls back to `collaborative`.
+Loads the artifact once per process and ranks unseen movies by predicted rating.
+Returns `[]` when there is no model or the user is unknown, and the dispatcher
+then falls back to `collaborative`.
 """
 
 from __future__ import annotations

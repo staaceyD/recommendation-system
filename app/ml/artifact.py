@@ -12,18 +12,11 @@ MODEL_FILE = "model.keras"
 VOCAB_FILE = "vocab.json"
 META_FILE = "meta.json"
 
-# Don't recommend a movie whose embedding was fitted from fewer ratings than this.
-# A movie costs `dim + 1` parameters (33 by default), so a handful of ratings leaves
-# them badly underdetermined -- and an overfitted embedding predicts extreme ratings,
-# which is exactly what floats a movie to the top of a full-catalogue ranking.
-# This filter used to be load-bearing: on a 6M slice it was precision@10 0.085 filtered
-# against 0.062 unfiltered. Most of that gap was it covering for unregularized biases --
-# once those carry L2 too (see app/ml/model.py) the same slice is 0.100 against 0.098, so
-# the filter is now worth a rounding error rather than a third of the score. Keep it: an
-# embedding still needs more evidence than an average does, which is why the cold-start
-# ranker refuses movies under 50 ratings. But it is no longer propping anything up, and
-# the value of 100 has never been derived -- it was picked against a model with flattened
-# embeddings and has only ever been re-checked since.
+# Don't recommend a movie whose embedding was fitted from fewer ratings than this: a
+# movie costs `dim + 1` parameters, and an underdetermined embedding predicts extremes,
+# which is what floats it to the top of a full-catalogue ranking. Worth much less since
+# the biases were regularized (it was largely covering for them) and 100 has never been
+# derived -- see docs/model-tuning.md.
 MIN_SUPPORT = 100
 
 
@@ -78,11 +71,10 @@ class MFArtifact:
     def rank_unseen(
         self, user_id: int, seen: set[int], limit: int, min_support: int = MIN_SUPPORT
     ) -> list[int]:
-        """Movie ids with the highest predicted rating for the user, excluding `seen`.
+        """Top predicted movies for the user, excluding `seen`.
 
-        Movies rated fewer than `min_support` times in training are held back, and
-        only used to top the list up if too few well-supported ones are left --
-        the same shape as the cold-start ranker backfilling past its genre filter.
+        Movies under `min_support` are held back, then used to top the list up if too
+        few well-supported ones are left.
         """
         if limit <= 0:
             return []
@@ -115,7 +107,6 @@ class MFArtifact:
         return [self.movies.ids[candidates[i]] for i in top]
 
     def _eligible(self, min_support: int) -> np.ndarray:
-        """Which movies have enough ratings behind their embedding to be trusted."""
         if self._eligible_cache is None or self._eligible_cache[0] != min_support:
             self._eligible_cache = (min_support, self.movie_counts >= min_support)
         return self._eligible_cache[1]
@@ -148,12 +139,7 @@ class MFArtifact:
         return out
 
     def _get_factors(self):
-        """The trained weights as plain arrays -- the same arithmetic the model graph does.
-
-        Scoring the whole catalogue through `model()` one user at a time is a forward
-        pass per user; as four matrices it is a single matmul, which is what makes
-        full-catalogue evaluation tractable.
-        """
+        """The trained weights as plain arrays, so scoring a whole catalogue is one matmul."""
         if self._factors is None:
             layer = self.model.get_layer
             self._factors = (

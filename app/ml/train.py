@@ -59,7 +59,7 @@ def train(
     if frame.empty:
         raise SystemExit("no ratings to train on -- seed the database first")
 
-    # Has to come from the frame, not a constant: see scaled_l2 in app/ml/model.py.
+    # Derived from the frame, never a constant -- see scaled_l2 in app/ml/model.py.
     if l2 is None:
         l2 = scaled_l2(len(frame))
     if bias_l2 is None:
@@ -78,8 +78,7 @@ def train(
     user_idx, movie_idx = user_idx[order], movie_idx[order]
     target = ratings[order] - global_mean
 
-    # Saved with the artifact so inference can skip movies with too little evidence
-    # behind their embedding -- see MIN_SUPPORT in app/ml/artifact.py.
+    # Saved so inference can skip thinly-rated movies -- see MIN_SUPPORT in artifact.py.
     counts = frame["movie_id"].value_counts()
     movie_counts = [int(counts[movie_id]) for movie_id in movies.ids]
 
@@ -127,12 +126,8 @@ def _save(
     history,
     num_ratings,
 ):
-    """Write the three artifact files into a staging dir, then swap it into place.
-
-    Writing them straight into `out_dir` would let an interrupted run leave a new
-    `model.keras` beside the previous run's `vocab.json` -- an artifact that loads
-    but predicts against the wrong ids.
-    """
+    """Stage the three files, then swap them in -- an interrupted write must not leave a
+    new `model.keras` beside the previous run's `vocab.json`."""
     path = Path(out_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     staging = Path(tempfile.mkdtemp(prefix=f".{path.name}-", dir=path.parent))

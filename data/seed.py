@@ -144,8 +144,7 @@ def load_movies_and_genres(cursor) -> set[int]:
 def load_users_and_ratings(
     connection, cursor, valid_movie_ids: set[int], ratings_limit: int | None
 ) -> None:
-    # ISO string rather than a datetime object: SQLite stores it verbatim and the
-    # implicit datetime->str adapter is deprecated on Python 3.12+.
+    # ISO string, not a datetime: the implicit adapter is deprecated on 3.12+.
     created_at = datetime.now(UTC).replace(tzinfo=None, microsecond=0).isoformat(sep=" ")
 
     seen_users: set[int] = set()
@@ -270,11 +269,8 @@ def main(argv: list[str] | None = None) -> int:
                 reset_tables(cursor)
                 raw.commit()
 
-            # Speed up the bulk load. Durability doesn't matter for a throwaway seed,
-            # and SQLite enforces no foreign keys unless PRAGMA foreign_keys is ON
-            # (it isn't here) -- our own filtering keeps referential integrity. The
-            # unique index on (user_id, movie_id) still applies, so INSERT OR IGNORE
-            # drops duplicate ratings.
+            # Durability doesn't matter for a throwaway seed; our own filtering keeps
+            # referential integrity, since SQLite enforces no FKs without the pragma.
             cursor.execute("PRAGMA synchronous = OFF")
             cursor.execute("PRAGMA journal_mode = MEMORY")
 
@@ -282,9 +278,8 @@ def main(argv: list[str] | None = None) -> int:
             valid_movie_ids = load_movies_and_genres(cursor)
             raw.commit()
 
-            # Drop the secondary index over ratings for the bulk load and rebuild it
-            # once at the end -- far cheaper than maintaining it per INSERT. The
-            # (user_id, movie_id) unique index has to stay (INSERT OR IGNORE needs it).
+            # Cheaper than maintaining it per INSERT. The (user_id, movie_id) unique
+            # index has to stay -- INSERT OR IGNORE needs it to drop duplicates.
             dropped = drop_secondary_indexes(cursor, "ratings")
             raw.commit()
 
@@ -293,9 +288,8 @@ def main(argv: list[str] | None = None) -> int:
                 load_users_and_ratings(raw, cursor, valid_movie_ids, args.ratings_limit)
                 raw.commit()
             finally:
-                # Rebuild even if the load failed or was interrupted: the migration
-                # that created these indexes is already recorded as applied, so
-                # `flask db upgrade` would not bring them back.
+                # Rebuild even on failure: the migration that created these is already
+                # recorded as applied, so `flask db upgrade` would not bring them back.
                 for name, sql in dropped:
                     print(f"Rebuilding index {name}...")
                     cursor.execute(sql)

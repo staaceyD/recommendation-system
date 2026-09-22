@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from app.ml.artifact import META_FILE, MODEL_FILE, VOCAB_FILE, MFArtifact
-from app.ml.model import build_model
+from app.ml.model import build_model, scaled_l2
 from app.ml.train import _save
 from app.ml.vocab import Vocab
 
@@ -16,6 +16,21 @@ def test_build_model_scores_one_value_per_pair():
         training=False,
     )
     assert tuple(out.shape) == (3, 1)
+
+
+def test_scaled_l2_holds_the_strength_per_rating_constant():
+    """`l2 * N` is the invariant -- a fixed `l2` regularizes harder the more data there is."""
+    products = [scaled_l2(n) * n for n in (1_600_000, 6_000_000, 32_000_000)]
+    assert products == pytest.approx([products[0]] * len(products))
+
+
+def test_training_scales_l2_to_the_dataset_when_it_is_not_given(
+    preferences, train_model, model_dir
+):
+    train_model(epochs=1, l2=None)  # the fixture pins l2; this exercises the default path
+
+    meta = json.loads((model_dir / META_FILE).read_text())
+    assert meta["l2"] == pytest.approx(scaled_l2(meta["num_ratings"]))
 
 
 def test_training_writes_a_loadable_artifact(preferences, train_model, model_dir):
@@ -56,7 +71,19 @@ def test_a_failed_save_leaves_the_previous_artifact_in_place(preferences, train_
         history = {"rmse": [0.5]}
 
     with pytest.raises(RuntimeError):
-        _save(model_dir, Exploding(), Vocab([1]), Vocab([2]), [1], 3.5, 8, 1e-5, FakeHistory(), 1)
+        _save(
+            model_dir,
+            Exploding(),
+            Vocab([1]),
+            Vocab([2]),
+            [1],
+            3.5,
+            8,
+            1e-5,
+            1e-5,
+            FakeHistory(),
+            1,
+        )
 
     assert (model_dir / VOCAB_FILE).read_text() == before
     assert MFArtifact.load(model_dir) is not None

@@ -41,7 +41,18 @@ def train_model(model_dir):
     def _train(**overrides):
         from app.ml.train import train
 
-        opts = {"dim": 8, "epochs": 40, "batch_size": 256, "validation_split": 0.0, "verbose": 0}
+        # Pinned rather than left to `scaled_l2`: these fixtures hold a few hundred
+        # ratings, orders of magnitude below the size that scaling is calibrated for,
+        # where it correctly shrinks a handful-of-ratings embedding to nothing. These
+        # tests are about whether the model learns a taste at all, so give it room to.
+        opts = {
+            "dim": 8,
+            "epochs": 40,
+            "batch_size": 256,
+            "validation_split": 0.0,
+            "l2": 1e-5,
+            "verbose": 0,
+        }
         opts.update(overrides)
         history = train(model_dir, **opts)
         rating_based.reset()

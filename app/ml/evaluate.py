@@ -1,23 +1,15 @@
-"""Offline evaluation: how good are the recommendations, really?
+"""Offline evaluation: is the *list* the user sees any good, which RMSE cannot say.
 
     uv run python -m app.ml.evaluate                  # evaluate on the whole ratings table
     uv run python -m app.ml.evaluate --limit 2000000  # quick run on a slice
     uv run python -m app.ml.evaluate --k 20 --users 2000 --json report.json
 
-Training RMSE says how well the model predicts a rating it was fitted on. It does
-not say whether the *list* the user sees is any good, so this splits the ratings
-per user (most of a user's ratings train, the rest are held out and never seen by
-the model), asks each recommender for a top-K list, and checks how much of the
-holdout it recovered.
+Splits each user's ratings, trains on the training half, and scores the top-K list
+against the holdout -- alongside `popularity` and `random`, since a bare
+"precision@10 = 0.11" means nothing.
 
-Scores like "precision@10 = 0.11" mean nothing on their own, so the same users and
-the same holdout are scored for two baselines as well: `popularity`, which is the
-cold-start ranking the app already falls back to, and `random`. A model that cannot
-beat `popularity` is not earning the embeddings it costs.
-
-This always trains its own model on the training split. It deliberately cannot
-evaluate `instance/mf/`: that artifact was fitted on every rating in the table, so
-every test row would already be memorised and every score would come out flattering.
+Always trains its own model; it deliberately cannot score `instance/mf/`, which was
+fitted on every rating in the table and would have memorised every test row.
 """
 
 from __future__ import annotations
@@ -60,15 +52,11 @@ def split_ratings(
     min_ratings: int = MIN_USER_RATINGS,
     seed: int = SEED,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Hold out a random `holdout` share of each user's ratings.
+    """Hold out a random `holdout` share of each user's ratings, per user not per row.
 
-    Per user, not per row: a global split would leave most test users with no
-    training history at all, which measures cold-start rather than the model.
-    Users below `min_ratings` keep all of their ratings in the training half.
-
-    MovieLens timestamps are dropped in preprocessing, so this is a random split
-    rather than "predict what they watched next" -- it slightly flatters any
-    recommender, since some holdout ratings are older than the ones it trained on.
+    A global split would leave most test users with no history, measuring cold-start
+    rather than the model. Timestamps are dropped in preprocessing, so this is random
+    rather than "what they watched next", which flatters any recommender slightly.
     """
     shuffled = frame.sample(frac=1.0, random_state=seed).sort_values("user_id", kind="stable")
     sizes = shuffled.groupby("user_id")["rating"].transform("size").to_numpy()
@@ -80,8 +68,7 @@ def split_ratings(
 
     train_frame = shuffled[~is_test].reset_index(drop=True)
     test_frame = shuffled[is_test]
-    # A movie seen only in the holdout has no embedding, so no recommender could
-    # ever return it -- scoring against it would just be noise in every column.
+    # A movie seen only in the holdout has no embedding, so nothing could return it.
     test_frame = test_frame[test_frame["movie_id"].isin(train_frame["movie_id"].unique())]
     return train_frame, test_frame.reset_index(drop=True)
 
@@ -99,11 +86,8 @@ class ModelRecommender:
 
 
 class PopularityRecommender:
-    """The cold-start fallback's ranking, rebuilt from the training split only.
-
-    `collaborative.recommend` also prefers genres the user already likes; this drops
-    that, so treat it as a floor for the fallback rather than a measurement of it.
-    """
+    """The cold-start ranking rebuilt from the training split, minus its genre
+    preference -- a floor for the fallback rather than a measurement of it."""
 
     name = "popularity"
 
@@ -193,10 +177,9 @@ def build_cases(
     num_users: int,
     seed: int = SEED,
 ) -> list[tuple[int, set[int], set[int]]]:
-    """Sample users and collect, for each, what they had seen and what they liked in the holdout.
+    """Per sampled user, what they had seen and what they liked in the holdout.
 
-    Every strategy is scored over this one list, so the comparison between them is
-    not clouded by them having been asked about different users.
+    Every strategy is scored over this one list, so they are asked about the same users.
     """
     liked = test_frame[test_frame["rating"] >= LIKED_RATING]
     candidates = liked["user_id"].unique()
@@ -282,8 +265,7 @@ def run(
         unfiltered = ModelRecommender(artifact, min_support=0, name="model (unfiltered)")
         reports = [
             score_recommender(model, cases, **shared),
-            # Kept in every report so the cost of the support filter stays visible:
-            # it buys accuracy by narrowing the catalogue, and that is a trade, not a win.
+            # Kept in every report so the support filter's cost stays visible.
             score_recommender(unfiltered, cases, **shared),
             score_recommender(PopularityRecommender(train_frame), cases, **shared),
             score_recommender(RandomRecommender(artifact.movies.ids, seed), cases, **shared),

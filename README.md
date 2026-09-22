@@ -44,7 +44,9 @@ data/
 ├── raw/                   # MovieLens CSVs, source + preprocessed (gitignored)
 ├── preprocess.py          # raw ml-32m CSVs -> the shape seed.py loads
 └── seed.py                # loads raw/ into SQLite
-docs/                      # Postman/Insomnia collection
+docs/
+├── recsys.postman_collection.json
+└── model-tuning.md        # why the regularization constants are what they are
 instance/                  # recsys.db + mf/ (trained model) — gitignored
 ```
 
@@ -114,8 +116,8 @@ writes `instance/mf/` (`model.keras` + `vocab.json` + `meta.json`), which `GET /
 loads on first use; retrain and restart to pick up a new one. Without a trained model every user
 falls through to the cold-start path.
 
-Raising `--epochs` past the default of 5 makes the *ranking* worse even though RMSE barely moves —
-read [Evaluation](#evaluation) before turning it up.
+Raising `--epochs` past the default of 5 has made the *ranking* worse even though RMSE barely
+moved — see [docs/model-tuning.md](docs/model-tuning.md) before turning it up.
 
 ### 7. Check the recommendations are any good
 
@@ -177,8 +179,11 @@ global_mean + user_vec · movie_vec + user_bias + movie_bias
 `app/ml/train.py` fits it against `rating - global_mean` with MSE loss, and saves the model and id
 vocabularies to `instance/mf/`. At request time `rating_based` loads that once per process and,
 for a known user, scores every unseen movie and returns the top `limit` — skipping movies with
-fewer than `MIN_SUPPORT` ratings behind their embedding. Both `MIN_SUPPORT` and the `L2` strength
-were chosen by the evaluation below; the code comments record the numbers.
+fewer than `MIN_SUPPORT` ratings behind their embedding.
+
+The regularization is not a pair of magic numbers: `L2` is *derived* from the size of the training
+set rather than fixed, and the biases carry a strength of their own on top of that. Both are
+measured, and both matter — see [Tuning notes](#tuning-notes).
 
 `tests/ml/` trains a tiny model on synthetic separable data each run — no committed model blob,
 nothing mocked — so training and inference are actually exercised in CI.
@@ -207,36 +212,32 @@ fitted on every rating in the table, so every held-out row would already be memo
 | `coverage` | Share of the catalogue ever recommended (0.001 = the same few hundred titles) |
 | `novelty` | Bits of surprise; low means blockbusters, high means the long tail |
 
-On a 1M-rating slice, 500 users, K=10:
+`uv run python -m app.ml.evaluate --limit 1000000 --users 500`:
 
 ```
 strategy                   prec@10   recall@10     ndcg@10      map@10      hit@10    coverage     novelty
-model (support >= 100)      0.1126      0.0868      0.1491      0.0802      0.5360      0.0148      9.9621
-model (unfiltered)          0.0974      0.0713      0.1294      0.0678      0.4960      0.0156     10.9100
+model (support >= 100)      0.1392      0.1108      0.1851      0.1050      0.6040      0.0127      9.4576
+model (unfiltered)          0.1370      0.1101      0.1832      0.1040      0.5940      0.0143      9.6004
 popularity                  0.0786      0.0604      0.1034      0.0513      0.4460      0.0015      9.6283
 random                      0.0010      0.0002      0.0008      0.0002      0.0100      0.1854     17.5163
 
-Rating prediction on the holdout: RMSE 0.8075 (predicting the global mean every time: 1.0516)
+Rating prediction on the holdout: RMSE 0.8382 (predicting the global mean every time: 1.0516)
 ```
 
-The model beats popularity on every ranking metric while recommending 10x more of the catalogue
-(coverage 0.0148 against 0.0015), so it is genuinely personalising rather than imitating the
-baseline. It holds on a 4M-rating slice by a narrower margin (prec@10 0.0640 against 0.0508).
+The model beats popularity on every ranking metric while recommending 8x more of the catalogue
+(coverage 0.0127 against 0.0015), so it is genuinely personalising rather than imitating the
+baseline. The unfiltered row sits just below the filtered one, which is the expected shape now
+that the biases are regularized — see [Tuning notes](#tuning-notes).
 
-Two things to know before touching the knobs:
+## Tuning notes
 
-- **Offline top-N flatters popularity**, because unrated ≠ disliked: a blockbuster scores as a
-  "hit" partly because it is the kind of film a user had the chance to rate at all. So raising
-  `MIN_SUPPORT` keeps "improving" precision — 800 beats 100 on the 1M slice — purely by narrowing
-  the catalogue until the model *is* the popularity baseline, at 0.6% coverage. It is set on
-  statistical grounds instead, and every report carries an unfiltered row so the filter's cost
-  stays visible. Watch `coverage` alongside `prec@K`.
-- **Training longer hurts the ranking** while RMSE barely moves: 15 epochs gives prec@10 0.097
-  against 0.113 at the default of 5. RMSE alone was never going to catch that.
+The regularization constants are derived rather than guessed, and two of them were set against
+mistakes that `prec@K` alone would have walked straight into. If you are about to change `L2`,
+`BIAS_L2_MULTIPLIER`, `MIN_SUPPORT` or `--epochs`, read **[docs/model-tuning.md](docs/model-tuning.md)**
+first — it records what each is worth, how it was measured, and which knobs bite back.
 
-Worth trying next: early stopping on a ranking metric rather than on loss, and a ranking loss
-(BPR / implicit feedback) instead of MSE — MSE optimises rating accuracy, and ranking is what the
-app actually serves.
+The one rule, if you read nothing else: never tune by maximising `prec@K`. Offline top-N rewards
+narrowing the catalogue, so check `coverage` alongside it every time.
 
 ## Contributing
 
